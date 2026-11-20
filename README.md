@@ -36,9 +36,15 @@ modele hiçbir istek gitmez (yalnızca senin yazdığın kelimenin çevirisi her
 
 ### Öğrenme hızı
 
-Seviye sadece tekrar zamanı gelmiş kelimeyi bildiğinde artar (2 dk → 10 dk → 1 saat → 5 saat → 1 gün → 3 gün …);
-erken gelen sorular "ekstra pratik" sayılır. Aynı kelime 4 dakika içinde tekrar gösterilmez, üst üste hiç gelmez;
-kelime azken kanka aynılarını döndürmek yerine yeni kelime önerir.
+Kelimeler gün içinde çok sık (aktifken kelime başına saatte onlarca kez) ama her seferinde yeni bir cümle ya da
+soru türüyle gelir; az görülen ve düşük seviyeli kelimeler öne alınır. Seviye ise sadece tekrar zamanı gelmiş kelimeyi
+bildiğinde artar (2 dk → 10 dk → 1 saat → 5 saat → 1 gün → 3 gün …); aradaki tüm tekrarlar "Extra-Übung"dur.
+Aynı kelime üst üste gelmez (az kelimede 25 sn, çok kelimede 90 sn ara).
+
+### Sadece Almanca
+
+Karakter yalnızca basit Almanca konuşur. Türkçe sadece kelimenin karşılığında görünür; cümle çevirileri
+balondaki **TR** düğmesine dokununca açılır.
 
 ### Seni tanıması
 

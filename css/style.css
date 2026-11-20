@@ -197,6 +197,23 @@ canvas {
 .shake { animation: shake 0.3s; }
 @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 
+/* çeviriler gizli; TR düğmesiyle açılır */
+.bubble:not(.show-tr) .tr { display: none !important; }
+.b-hint .tr { display: block; }
+.tr-toggle {
+  float: right;
+  margin: -2px -3px 2px 8px;
+  font: 600 11px/1 var(--serif);
+  letter-spacing: 0.06em;
+  padding: 4px 6px;
+  border: 1.5px solid var(--ink);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.bubble.show-tr .tr-toggle { background: var(--ink); color: var(--bg-hi); }
+
 /* ---------- düşünce balonu ---------- */
 .thought {
   position: absolute;
@@ -309,7 +326,7 @@ body.paused #pauseBtn .i-pause { display: none; }
 .word-list { list-style: none; margin: 0; padding: 0; min-height: 60px; max-height: 300px; overflow: auto; border-radius: 8px; }
 .word-list li {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   align-items: center;
   gap: 8px;
   padding: 7px 2px;
@@ -320,6 +337,7 @@ body.paused #pauseBtn .i-pause { display: none; }
 .word-list li .de small { font-style: normal; font-weight: 400; color: var(--ink-2); font-size: 13px; }
 .word-list li .tr { display: block; font-size: 14px; color: var(--ink-2); }
 .word-list .lv { display: flex; gap: 2px; }
+.word-list .seen { font-size: 12.5px; color: var(--ink-2); font-style: italic; }
 .word-list .lv i { width: 6px; height: 6px; border: 1.2px solid var(--ink); border-radius: 1px; }
 .word-list .lv i.f { background: var(--ink); }
 .word-list .del { border: 0; background: none; cursor: pointer; font-size: 18px; padding: 0 4px; color: var(--ink-2); }

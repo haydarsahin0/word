@@ -57,7 +57,7 @@
       plural: s(j.plural, 60),
       meaning_tr: s(j.meaning_tr, 220),
       explain_de: s(j.explain_de, 260),
-      say_tr: s(j.say_tr, 160),
+      say_de: s(j.say_de, 160),
       ex,
       dir: j.lang === 'de' ? 'de2tr' : 'tr2de',
       source: 'muse',
