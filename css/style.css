@@ -323,6 +323,11 @@ body.paused #pauseBtn .i-pause { display: none; }
 .sheet-title { font-size: 25px; font-style: italic; }
 .setting { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 17px; }
 .stepper { display: flex; align-items: center; gap: 8px; }
+.name-input {
+  width: 150px; text-align: right;
+  background: transparent; border: var(--stroke) solid var(--ink); border-radius: 6px;
+  padding: 5px 9px; font-size: 17px; font-style: italic; outline: none;
+}
 .stepper b { min-width: 44px; text-align: center; font-weight: 500; font-size: 18px; }
 .seg { display: flex; gap: 4px; }
 .seg .btn.on { background: var(--ink); color: var(--bg); }

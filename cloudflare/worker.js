@@ -4,6 +4,7 @@
 const BASE = "https://api.meta.ai/v1";
 let ENV = {};
 let USAGE = null; // bu istekte harcanan token'lar (maliyet takibi için)
+let EFFORT = ""; // modelin düşünme seviyesi (aşağıdaki DEFAULT_EFFORT)
 const modelName = () => ENV.MUSE_MODEL || "muse-ember-1.0";
 
 const ALLOWED_ORIGINS = [
@@ -69,7 +70,7 @@ async function callModel(messages, temperature = 0.7) {
   const r = await fetch(`${BASE}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: modelName(), messages, temperature }),
+    body: JSON.stringify({ model: modelName(), messages, temperature, ...(EFFORT ? { reasoning_effort: EFFORT } : {}) }),
   });
   if (r.ok) {
     const j = await r.json();
@@ -88,7 +89,7 @@ async function callModel(messages, temperature = 0.7) {
   const r2 = await fetch(`${BASE}/responses`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: modelName(), instructions: system, input, temperature }),
+    body: JSON.stringify({ model: modelName(), instructions: system, input, temperature, ...(EFFORT ? { reasoning: { effort: EFFORT } } : {}) }),
   });
   if (!r2.ok) throw new Error(`model_${r2.status}: ${(await r2.text()).slice(0, 300)}`);
   const j2 = await r2.json();
@@ -134,7 +135,9 @@ const PERSONA =
   "You are 'Kelime', the learner's close friend who sits at a little desk and studies German FOR them all day. " +
   "The learner is a native Turkish speaker (about A2) learning German. YOU ONLY SPEAK GERMAN: every line you say to " +
   "them (explanations, hints, questions, feedback, small talk) is simple, natural, friendly German with A1–A2 words and " +
-  "short sentences, casual like a buddy (you may say 'Kumpel', 'na?', 'komm schon', 'stark!'). Never use emojis. " +
+  "short sentences. Sound like their real close friend: warm, relaxed, a little playful, genuinely happy to help. " +
+  "If their name is given (line 'Name: ...' in the notes), call them by their first name naturally now and then " +
+  "(not in every line). Never call them 'Kumpel', 'Bro', 'Alter' or similar. Never use emojis. " +
   "Turkish appears ONLY inside fields that are explicitly translations (tr, alts, q_tr, meaning_tr, summary/profile fields " +
   "marked _tr). German must be correct and natural. Always answer with ONLY a JSON object, no markdown, no commentary.";
 
@@ -185,7 +188,7 @@ Return this JSON:
   "alts": up to 2 other Turkish meanings (array, may be empty),
   "meaning_tr": ONE short Turkish sentence explaining what it means / when it is used (only shown as a hidden translation),
   "explain_de": at most 2 VERY simple German sentences (A1–A2 words only) explaining the meaning, as a teacher would to a beginner,
-  "say_de": one short, casual German friend line about this word (a tiny joke, memory trick or "Das brauchst du oft, Kumpel!"),
+  "say_de": one short, casual German friend line about this word (a tiny joke or memory trick, e.g. "Das brauchst du jeden Tag, Haydar!"),
   "example": { "de": a natural everyday German sentence (6–12 words) that contains exactly the word form given in "de", "tr": its Turkish translation }
 }`;
 
@@ -211,7 +214,7 @@ Return: {"items":[ ... ]}`;
 const CHECK = `${PERSONA}
 
 You asked the learner a question in German. Judge their answer kindly. Small mistakes are fine if it is understandable.
-Return: {"ok": true|false (did they answer sensibly and use German reasonably?), "fix_de": "<a corrected / more natural version of their answer, or empty if already perfect>", "feedback_de": "<one short, warm, casual German friend sentence ('Stark, Kumpel!' vibe if good, gentle and encouraging if not)>"}`;
+Return: {"ok": true|false (did they answer sensibly and use German reasonably?), "fix_de": "<a corrected / more natural version of their answer, or empty if already perfect>", "feedback_de": "<one short, warm, casual German friend sentence (warm and happy if good, e.g. "Stark, Haydar!"; gentle and encouraging if not)>"}`;
 
 const THEMES = [
   "at home in the morning", "in the supermarket", "at work / in the office", "on the train or bus",
@@ -238,6 +241,11 @@ async function handle(req) {
   } catch {
     return json({ error: "bad_json" }, 400, h);
   }
+  // Düşünme seviyesi: ölçümlerde 'minimal' çıktı token'larını ~%85 azalttı, kalite aynı kaldı.
+  // Profil çıkarımı seyrek ve daha zor olduğu için 'low'. (İstemci seviyeyi seçemez.)
+  const DEFAULT_EFFORT = { lookup: "minimal", talk: "minimal", check: "minimal", profile: "low" };
+  const eff = String(ENV.MUSE_EFFORT || DEFAULT_EFFORT[body?.action] || "");
+  EFFORT = ["minimal", "low", "medium", "high"].includes(eff) ? eff : "";
 
   try {
     switch (body?.action) {
@@ -307,6 +315,7 @@ export default {
   async fetch(req, env) {
     ENV = env;
     USAGE = { in: 0, out: 0, reasoning: 0, calls: 0 };
+    EFFORT = "";
     return handle(req);
   },
 };

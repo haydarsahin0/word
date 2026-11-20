@@ -38,7 +38,7 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar' }, paused: false };
   }
   function save() {
     try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* depolama yok */ }
@@ -57,6 +57,8 @@
     return n;
   }
   const fullDe = (w) => (w.art ? w.art + ' ' : '') + w.de;
+  /** İsimle hitap: "Haydar" (ayarlardan değişir); boşsa hiç eklenmez */
+  const nameTag = (pre = '', post = '') => { const n = (state.settings.name || '').trim(); return n ? pre + n + post : ''; };
 
   /* ---------- aynı kelime tek kayıt ---------- */
   const deKey = (de) => String(de || '').normalize('NFC').trim().toLowerCase().replace(/^(der|die|das)\s+/, '').replace(/\s+/g, ' ');
@@ -337,8 +339,10 @@
   }
   function profileText() {
     const p = state.profile;
-    if (!p) return '';
+    const nm = (state.settings.name || '').trim();
+    if (!p) return nm ? 'Name: ' + nm : '';
     const parts = [];
+    if (nm) parts.push('Name: ' + nm);
     if (p.summary_tr) parts.push('Summary: ' + p.summary_tr);
     if (p.level) parts.push('Level: ' + p.level);
     if (p.interests && p.interests.length) parts.push('Interests: ' + p.interests.join(', '));
@@ -525,7 +529,7 @@
         if (bubbleKind) return;
         setMood('happy', 3000);
         showBubble(`<div class="b-tag">Tagesziel</div><div class="b-big">Geschafft!</div>
-          <div class="b-hint">Heute ${n} neue Wörter. Toll gemacht, Kumpel!</div>`, 'info', { autoClose: 5000 });
+          <div class="b-hint">Heute ${n} neue Wörter. Toll gemacht${nameTag(', ')}!</div>`, 'info', { autoClose: 5000 });
       }, 6000);
     }
   }
@@ -692,7 +696,7 @@
     sfx(ok ? 'ok' : 'no');
     if (ok) {
       setMood('happy', 2200);
-      const praise = pick(['Super!', 'Sehr gut!', 'Genau!', 'Stark, Kumpel!', 'Perfekt!', 'Klasse!']);
+      const praise = pick(['Super!', 'Sehr gut!', 'Genau!', `Stark${nameTag(', ')}!`, 'Perfekt!', `Klasse${nameTag(', ')}!`]);
       showBubble(`<div class="b-tag">${praise}</div>
         <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
         <div class="b-mean">${esc(w.tr)}</div>
@@ -768,14 +772,15 @@
     ];
     if (w) {
       lines.push(`„${fullDe(w)}“ – ich schreibe einen neuen Satz…`);
-      lines.push(`vergiss „${w.de}“ nicht, ja?`);
+      lines.push(`${nameTag('', ', ')}vergiss „${w.de}“ nicht, ja?`);
       lines.push(`${fullDe(w)}… ${fullDe(w)}… okay, gemerkt`);
     }
     const nToday = todayAdded();
     if (nToday) lines.push(`heute schon ${nToday} neue Wörter – nicht schlecht!`);
     if (nToday < state.settings.dailyGoal && nToday > 0) lines.push(`noch ${state.settings.dailyGoal - nToday} Wörter bis zum Tagesziel`);
     if (h >= 23 || h < 6) lines.push('es ist spät, aber ich bin noch da', 'ich bin müde… aber weiter geht’s');
-    if (h >= 6 && h < 11) lines.push('guten Morgen! Der Kaffee geht auf mich');
+    if (h >= 6 && h < 11) lines.push(`guten Morgen${nameTag(', ')}! Der Kaffee geht auf mich`);
+    lines.push(`${nameTag('', ', ')}ich bin stolz auf dich`, `${nameTag('', ', ')}wir schaffen das zusammen`);
     if (aiQueue.length) lines.push('ich habe ein paar Sätze vorbereitet…');
     if (scene.mood !== 'thinking' && Math.random() < 0.5) setMood('thinking', 4500);
     const fresh = lines.filter((l) => !recentThoughts.includes(l));
@@ -993,7 +998,7 @@
     record(w, ok);
     setMood(ok ? 'happy' : 'talking', 2200);
     const fix = res && typeof res.fix_de === 'string' && res.fix_de.trim() && normalize(res.fix_de) !== normalize(answer) ? res.fix_de.trim() : '';
-    const fb = res && (res.feedback_de || res.feedback) ? (res.feedback_de || res.feedback) : (ok ? 'Gut gemacht, Kumpel!' : `Versuch, „${fullDe(w)}“ zu benutzen.`);
+    const fb = res && (res.feedback_de || res.feedback) ? (res.feedback_de || res.feedback) : (ok ? `Gut gemacht${nameTag(', ')}!` : `Versuch, „${fullDe(w)}“ zu benutzen.`);
     showBubble(`<div class="b-tag">${ok ? 'stark!' : 'fast!'}</div>
       <div>${esc(fb)}</div>
       ${fix ? `<div class="b-ex">besser so: „${esc(fix)}“ <button class="btn speak" data-act="say-ex" data-text="${esc(fix)}" aria-label="Sesli oku">${speakerSvg}</button></div>` : ''}
@@ -1117,7 +1122,7 @@
     if (busy) return;
     if (!state.words.length) {
       setMood('talking', 1500);
-      showBubble(`<div class="b-tag">Hey!</div><div>Mein Heft ist noch leer. Schreib unten ein Wort – oder warte kurz, ich bringe dir neue Wörter.</div>
+      showBubble(`<div class="b-tag">Hey${nameTag(' ')}!</div><div>Mein Heft ist noch leer. Schreib unten ein Wort – oder warte kurz, ich bringe dir neue Wörter.</div>
         <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 12000 });
       return;
     }
@@ -1163,7 +1168,7 @@
     if (state.paused) return;
     hideThought();
     setMood('happy', 1500);
-    think(pick(['Da bist du ja! Weiter geht’s', 'Hallo! Ich habe auf dich gewartet', 'Ich bin wach – los geht’s']), 4000);
+    think(pick([`Da bist du ja${nameTag(', ')}! Weiter geht’s`, `Hallo${nameTag(' ')}! Ich habe auf dich gewartet`, 'Ich bin wach – los geht’s']), 4000);
     nextReviewAt = Math.max(nextReviewAt, Date.now() + 6000);
   }
 
@@ -1188,6 +1193,7 @@
   function renderSheet() {
     document.querySelectorAll('.stepper').forEach((s) => { s.querySelector('b').textContent = state.settings[s.dataset.key]; });
     document.querySelectorAll('#freqSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === state.settings.freq));
+    $('nameInput').value = state.settings.name || '';
     document.querySelectorAll('#sfxSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === (state.settings.sfx || 'on')));
     document.querySelectorAll('#voiceSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === state.settings.voice));
     const mastered = state.words.filter((w) => w.level >= MASTERED).length;
@@ -1254,6 +1260,10 @@
     state.settings.freq = b.dataset.v; save(); renderSheet();
     nextReviewAt = Math.min(nextReviewAt, Date.now() + GAPS[state.settings.freq]);
   });
+  $('nameInput').addEventListener('change', (e) => {
+    state.settings.name = e.target.value.trim().slice(0, 30);
+    save();
+  });
   $('sfxSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
     state.settings.sfx = b.dataset.v; save(); renderSheet();
@@ -1309,7 +1319,7 @@
     setTimeout(() => {
       if (bubbleKind || busy) return;
       setMood('talking', 1500);
-      showBubble(`<div class="b-tag">Hallo!</div><div>Ich bin da und lerne mit dir Deutsch. Schreib unten ein Wort – auf Türkisch oder Deutsch – und ich erkläre es dir. Danach bringe ich dir den ganzen Tag Sätze und Fragen.</div>
+      showBubble(`<div class="b-tag">Hallo${nameTag(' ')}!</div><div>Ich bin da und lerne mit dir Deutsch. Schreib unten ein Wort – auf Türkisch oder Deutsch – und ich erkläre es dir. Danach bringe ich dir den ganzen Tag Sätze und Fragen.</div>
         <div class="b-actions"><button class="btn sm" data-act="close">alles klar</button></div>`, 'info', { autoClose: 20000, focus: false });
     }, 1200);
   }
