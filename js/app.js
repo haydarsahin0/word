@@ -57,16 +57,39 @@
   /* ---------- ses efektleri ---------- */
   if (window.SFX) SFX.setEnabled(() => state.settings.sfx !== 'off');
   const sfx = (n) => window.SFX && SFX.play(n);
+  const ACT_SOUNDS = {
+    close: 'pop', edit: 'edit', delete: 'del', reveal: 'reveal', later: 'later',
+    addnew: 'coin', skip: 'whoosh', 'say-ex': 'bell',
+  };
+  const ID_SOUNDS = {
+    menuBtn: 'menuOpen', closeSheet: 'menuClose', askBtn: 'ask', exportBtn: 'export',
+    resetBtn: 'reset', profileRefresh: 'refresh', profileForget: 'forget',
+  };
+  function soundFor(b) {
+    if (b.id === 'pauseBtn') return state.paused ? 'resume' : 'pause';
+    if (ID_SOUNDS[b.id]) return ID_SOUNDS[b.id];
+    if (b.matches('label.btn') && b.querySelector('#importFile')) return 'import';
+    if (b.dataset.say) return 'bell';
+    const act = b.dataset.act;
+    if (act === 'knew' || act === 'forgot' || act === 'giveup') return null; // sonuç sesi çalacak
+    if (ACT_SOUNDS[act]) return ACT_SOUNDS[act];
+    if (b.dataset.d) return +b.dataset.d > 0 ? 'plus' : 'minus';
+    if (b.closest('#freqSeg')) return 'choice' + ['often', 'normal', 'rare'].indexOf(b.dataset.v);
+    if (b.closest('#voiceSeg')) return b.dataset.v === 'on' ? 'on' : 'off';
+    if (b.closest('#sfxSeg')) return b.dataset.v === 'on' ? null : 'off';
+    if (b.classList.contains('del')) return 'crumple';
+    return 'tap';
+  }
   document.addEventListener('click', (e) => {
     const b = e.target.closest('button, label.btn');
     if (!b || (b.type === 'submit' && b.form) || b.disabled) return;
-    const id = b.id;
-    if (id === 'pauseBtn') return sfx('toggle');
-    if (id === 'menuBtn' || id === 'closeSheet') return sfx('soft');
-    if (['knew', 'forgot', 'giveup'].includes(b.dataset.act)) return; // sonucu kendi sesiyle çalar
-    sfx('tap');
+    const name = soundFor(b);
+    if (name) sfx(name);
   }, true);
-  document.addEventListener('submit', () => sfx('send'), true);
+  document.addEventListener('submit', (e) => {
+    const kind = e.target.dataset && e.target.dataset.form;
+    sfx(kind === 'answer' ? 'tick' : kind === 'manual' || kind === 'edit' ? 'save' : 'send');
+  }, true);
   /* ---------- sahne ---------- */
   const canvas = $('scene');
   const stage = $('stage');
@@ -939,7 +962,7 @@
     startReview(w);
   }
   $('askBtn').addEventListener('click', askNow);
-  canvas.addEventListener('click', () => { sfx('tap'); if (!bubbleKind) askNow(); });
+  canvas.addEventListener('click', () => { sfx('boop'); if (!bubbleKind) askNow(); });
 
   /* ---------- sürekli döngü ---------- */
   setInterval(() => {
@@ -1054,7 +1077,7 @@
   $('sfxSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
     state.settings.sfx = b.dataset.v; save(); renderSheet();
-    if (b.dataset.v === 'on') sfx('ok');
+    if (b.dataset.v === 'on') sfx('on');
   });
   $('voiceSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
