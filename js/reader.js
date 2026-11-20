@@ -149,6 +149,7 @@
 
   function renderEmpty(msg) {
     const r = $('reader');
+    setTimeout(() => opts.onLayout && opts.onLayout(), 0);
     r.classList.add('empty');
     r.innerHTML = `<button class="r-open" id="rOpen">
         <b>Buch öffnen</b>
@@ -187,6 +188,7 @@
     pages = Math.max(1, Math.round((flow.scrollWidth + gap) / step));
     page = toEnd ? pages - 1 : Math.min(pages - 1, Math.max(0, Math.round((targetRatio || 0) * pages)));
     show();
+    if (opts.onLayout) opts.onLayout();
   }
 
   function show() {

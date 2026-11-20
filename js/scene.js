@@ -40,7 +40,9 @@
       const parent = this.canvas.parentElement;
       const cw = parent.clientWidth || 320;
       const dpr = window.devicePixelRatio || 1;
-      const target = Math.max(1.5, Math.min(3, cw / 185));
+      let target = Math.max(1.5, Math.min(3, cw / 185));
+      // ekran yüksekliğine sığmak için uygulama bir üst sınır verebilir
+      if (this.maxCssH) target = Math.max(1.5, Math.min(target, this.maxCssH / H));
       this.k = Math.max(1, Math.round(target * dpr));
       this.pcss = this.k / dpr;
       this.W = Math.floor(cw / this.pcss);

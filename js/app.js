@@ -370,6 +370,33 @@
   const bubble = $('bubble');
   const scene = new window.Scene(canvas);
   scene.onResize = () => { syncGround(); placeBubble(); if (typeof placeThought === 'function') placeThought(); };
+
+  /** Kart ekrana sığsın: önce karakterin üstündeki boşluk, gerekirse sahne küçülür */
+  function fitToScreen() {
+    const card = $('card');
+    stage.style.paddingTop = '';
+    scene.maxCssH = null;
+    scene.resize();
+    const avail = window.innerHeight - 24;
+    let over = card.offsetHeight - avail;
+    if (over > 0) {
+      const pad = parseFloat(getComputedStyle(stage).paddingTop) || 0;
+      const newPad = Math.max(28, pad - over);
+      stage.style.paddingTop = newPad + 'px';
+      over -= pad - newPad;
+    }
+    if (over > 0) {
+      scene.maxCssH = Math.max(92 * 1.5, canvas.offsetHeight - over);
+      scene.resize();
+    }
+    syncGround();
+    placeBubble();
+    if (typeof placeThought === 'function') placeThought();
+  }
+  let fitTimer = 0;
+  const scheduleFit = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitToScreen, 60); };
+  window.addEventListener('resize', scheduleFit);
+  window.addEventListener('orientationchange', scheduleFit);
   function syncGround() {
     const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
     stage.style.setProperty('--ground', (cr.top - sr.top + scene.groundY()) + 'px');
@@ -1263,6 +1290,7 @@
   }
   if (window.Reader) {
     Reader.init({
+      onLayout: scheduleFit,
       onWord: lookupFromBook,
       onPage: () => { readerQuietUntil = Date.now() + 25000; if (bubbleKind && bubbleKind !== 'review') hideBubble(); },
       onOpen: (b) => {
@@ -1638,7 +1666,8 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   render();
   requestAnimationFrame(syncGround);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { scene.resize(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { scene.resize(); scheduleFit(); });
+  scheduleFit();
   if (state.paused) scene.setMood('sleep');
   else if (!state.words.length) {
     setTimeout(() => {
