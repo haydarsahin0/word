@@ -34,7 +34,7 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on' }, paused: false };
   }
   function save() {
     try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* depolama yok */ }
@@ -54,6 +54,19 @@
   }
   const fullDe = (w) => (w.art ? w.art + ' ' : '') + w.de;
 
+  /* ---------- ses efektleri ---------- */
+  if (window.SFX) SFX.setEnabled(() => state.settings.sfx !== 'off');
+  const sfx = (n) => window.SFX && SFX.play(n);
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button, label.btn');
+    if (!b || (b.type === 'submit' && b.form) || b.disabled) return;
+    const id = b.id;
+    if (id === 'pauseBtn') return sfx('toggle');
+    if (id === 'menuBtn' || id === 'closeSheet') return sfx('soft');
+    if (['knew', 'forgot', 'giveup'].includes(b.dataset.act)) return; // sonucu kendi sesiyle çalar
+    sfx('tap');
+  }, true);
+  document.addEventListener('submit', () => sfx('send'), true);
   /* ---------- sahne ---------- */
   const canvas = $('scene');
   const stage = $('stage');
@@ -527,6 +540,7 @@
     save();
     render();
     const nextTxt = humanize(w.due - now);
+    sfx(ok ? 'ok' : 'no');
     if (ok) {
       setMood('happy', 2200);
       const praise = pick(['helal kanka!', 'Super!', 'Sehr gut!', 'işte bu!', 'Genau!', 'sen bu işi biliyorsun']);
@@ -806,6 +820,7 @@
     busy = false;
     const used = new RegExp(w.de.slice(0, Math.max(3, w.de.length - 2)), 'i').test(answer);
     const ok = res ? !!res.ok : used;
+    sfx(ok ? 'ok' : 'no');
     logEvent('answer', { question: q, answer, ok, fix: res && res.fix_de });
     record(w, ok);
     setMood(ok ? 'happy' : 'talking', 2200);
@@ -924,7 +939,7 @@
     startReview(w);
   }
   $('askBtn').addEventListener('click', askNow);
-  canvas.addEventListener('click', () => { if (!bubbleKind) askNow(); });
+  canvas.addEventListener('click', () => { sfx('tap'); if (!bubbleKind) askNow(); });
 
   /* ---------- sürekli döngü ---------- */
   setInterval(() => {
@@ -970,6 +985,7 @@
   function renderSheet() {
     document.querySelectorAll('.stepper').forEach((s) => { s.querySelector('b').textContent = state.settings[s.dataset.key]; });
     document.querySelectorAll('#freqSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === state.settings.freq));
+    document.querySelectorAll('#sfxSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === (state.settings.sfx || 'on')));
     document.querySelectorAll('#voiceSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === state.settings.voice));
     const mastered = state.words.filter((w) => w.level >= MASTERED).length;
     const reviews = Object.values(state.days).reduce((s, d) => s + (d.reviewed || 0), 0);
@@ -1034,6 +1050,11 @@
     const b = e.target.closest('[data-v]'); if (!b) return;
     state.settings.freq = b.dataset.v; save(); renderSheet();
     nextReviewAt = Math.min(nextReviewAt, Date.now() + GAPS[state.settings.freq]);
+  });
+  $('sfxSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    state.settings.sfx = b.dataset.v; save(); renderSheet();
+    if (b.dataset.v === 'on') sfx('ok');
   });
   $('voiceSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
