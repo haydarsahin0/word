@@ -5,7 +5,7 @@
   // Aralıklı tekrar seviyeleri (Leitner benzeri)
   const INTERVALS = [45 * 1000, 3 * MIN, 15 * MIN, HOUR, 6 * HOUR, DAY, 3 * DAY, 7 * DAY, 16 * DAY, 35 * DAY, 90 * DAY];
   const MASTERED = 5;
-  const GAPS = { often: 15 * 1000, normal: 40 * 1000, rare: 2 * MIN };
+  const GAPS = { often: 10 * 1000, normal: 22 * 1000, rare: 60 * 1000 };
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -50,7 +50,7 @@
   const stage = $('stage');
   const bubble = $('bubble');
   const scene = new window.Scene(canvas);
-  scene.onResize = () => { syncGround(); placeBubble(); };
+  scene.onResize = () => { syncGround(); placeBubble(); if (typeof placeThought === 'function') placeThought(); };
   function syncGround() {
     const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
     stage.style.setProperty('--ground', (cr.top - sr.top + scene.groundY()) + 'px');
@@ -100,8 +100,9 @@
     bubble.style.animation = 'none';
     void bubble.offsetWidth;
     bubble.style.animation = '';
+    hideThought();
     placeBubble();
-    if (opts.autoClose) bubbleTimer = setTimeout(() => hideBubble(), opts.autoClose);
+    if (opts.autoClose) bubbleTimer = setTimeout(() => { if (opts.onTimeout) opts.onTimeout(); hideBubble(); }, opts.autoClose);
     const inp = bubble.querySelector('input');
     if (inp && opts.focus !== false) setTimeout(() => inp.focus({ preventScroll: true }), 60);
   }
@@ -124,6 +125,8 @@
     left = Math.max(8, Math.min(left, sr.width - bw - 8));
     bubble.style.left = left + 'px';
     bubble.style.bottom = (sr.height - hy + 14) + 'px';
+    const cardTop = $('card').getBoundingClientRect().top;
+    bubble.style.maxHeight = Math.max(160, sr.top - cardTop + hy - 30) + 'px';
     bubble.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
   }
   window.addEventListener('resize', placeBubble);
@@ -162,12 +165,16 @@
     return m ? m[2] : null;
   }
 
-  function wordCard(w, tag) {
+  function wordCard(w, tag, opts = {}) {
     const alts = (w.alts || []).length ? ` <span class="alt">· ${esc(w.alts.slice(0, 2).join(', '))}</span>` : '';
     const ex = w.ex ? `<div class="b-ex">„${highlight(w.ex.de, w.de) || esc(w.ex.de)}“${w.ex.tr ? `<span class="tr">${esc(w.ex.tr)}</span>` : ''}</div>` : '';
-    return `<div class="b-tag">${tag}</div>
+    const plural = w.plural ? ` <span class="alt">· çoğul: ${esc(w.plural)}</span>` : '';
+    const meaning = w.meaning_tr ? `<div class="b-hint">${esc(w.meaning_tr)}</div>` : '';
+    const simple = w.explain_de ? `<div class="b-simple"><span>einfach gesagt</span>${esc(w.explain_de)}</div>` : '';
+    const sayLine = opts.say && w.say_tr ? `<div class="b-say">${esc(w.say_tr)}</div>` : '';
+    return `<div class="b-tag">${tag}</div>${sayLine}
       <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
-      <div class="b-mean">${esc(w.tr)}${alts}</div>${ex}`;
+      <div class="b-mean">${esc(w.tr)}${alts}${plural}</div>${meaning}${simple}${ex}`;
   }
 
   /* ---------- kelime ekleme ---------- */
@@ -183,7 +190,7 @@
     const existing = findExisting(q);
     if (existing) {
       setMood('happy', 1800);
-      showBubble(`${wordCard(existing, 'bunu zaten biliyoruz ✓')}
+      showBubble(`${wordCard(existing, 'bunu zaten biliyoruz kanka ✓')}
         <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 15000 });
       if (state.settings.voice === 'on') say(fullDe(existing));
       return;
@@ -191,6 +198,7 @@
     busy = true;
     hideBubbleQuiet();
     setMood('thinking');
+    think(pick(['dur bakayım… sözlüğü karıştırıyorum', 'hmm, bunu sana güzel anlatayım', 'tamam kanka, hemen bakıyorum', 'bir saniye, not alıyorum']) + '…', 6000);
     const started = Date.now();
     let res = null, err = null;
     try { res = await window.Translator.lookup(q); } catch (e) { err = e; }
@@ -203,11 +211,12 @@
       return;
     }
     setMood('typing');
+    think('defterime yazıyorum…', 1200);
     await sleep(900);
     const w = addWord(res);
     busy = false;
     setMood('talking', 1500);
-    showBubble(`${wordCard(w, 'yeni kelime · hafızama yazdım')}
+    showBubble(`${wordCard(w, 'yeni kelime · defterime yazdım', { say: true })}
       <div class="b-actions"><button class="btn sm" data-act="close">tamam</button><button class="btn sm" data-act="edit" data-id="${w.id}">düzelt</button></div>`,
       'info', { autoClose: 25000 });
     if (state.settings.voice === 'on') say(fullDe(w));
@@ -225,6 +234,7 @@
     const w = {
       id: now.toString(36) + Math.random().toString(36).slice(2, 6),
       de: res.de, art: res.art || '', tr: res.tr, alts: res.alts || [], pos: res.pos || '',
+      plural: res.plural || '', meaning_tr: res.meaning_tr || '', explain_de: res.explain_de || '', say_tr: res.say_tr || '',
       ex: res.ex || null, dir: res.dir || 'tr2de', source: res.source || '',
       level: 0, due: now + INTERVALS[0], created: now, reviews: 0, correct: 0, lapses: 0, last: 0,
     };
@@ -244,7 +254,7 @@
         if (bubbleKind) return;
         setMood('happy', 3000);
         showBubble(`<div class="b-tag">günlük hedef</div><div class="b-big">Tamamlandı!</div>
-          <div class="b-hint">Bugün ${d.added} yeni kelime. Toll gemacht!</div>`, 'info', { autoClose: 5000 });
+          <div class="b-hint">Bugün ${d.added} yeni kelime kanka, helal olsun. Toll gemacht!</div>`, 'info', { autoClose: 5000 });
       }, 6000);
     }
   }
@@ -292,6 +302,13 @@
     return 'recall';
   }
 
+  const REVIEW_OPTS = { autoClose: 120000, onTimeout: () => postpone() };
+  function postpone() {
+    if (current && current.w) current.w.due = Math.max(current.w.due, Date.now() + 5 * MIN);
+    current = null;
+    save();
+  }
+
   function startReview(w, mode) {
     if (!w) return;
     mode = mode || pickMode(w);
@@ -304,20 +321,20 @@
         <div class="b-ex" style="border:0;margin:0;padding:0">„${highlight(w.ex.de, exW, 'gap')}“</div>
         <div class="b-hint">ipucu: ${esc(w.tr)}${w.ex.tr ? ` · <i>${esc(w.ex.tr)}</i>` : ''}</div>
         <form class="b-form" data-form="answer"><input name="a" placeholder="hangi kelime?" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
-        <div class="b-actions"><button class="btn sm" data-act="giveup">bilmiyorum</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review');
+        <div class="b-actions"><button class="btn sm" data-act="giveup">bilmiyorum</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review', REVIEW_OPTS);
     } else if (mode === 'reverse') {
       current.answer = w.de;
       showBubble(`<div class="b-tag">almancası neydi?</div>
         <div class="b-big">${esc(w.tr)}</div>
         <form class="b-form" data-form="answer"><input name="a" placeholder="${w.pos === 'n' ? 'artikel + kelime' : 'almanca'}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
-        <div class="b-actions"><button class="btn sm" data-act="giveup">bilmiyorum</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review');
+        <div class="b-actions"><button class="btn sm" data-act="giveup">bilmiyorum</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review', REVIEW_OPTS);
     } else {
       current.mode = 'recall';
       const sentence = w.ex ? `<div class="b-ex" style="border:0;margin:0;padding:0">„${highlight(w.ex.de, w.de) || esc(w.ex.de)}“</div>` : '';
-      showBubble(`<div class="b-tag">bunu hatırlıyor musun?</div>
+      showBubble(`<div class="b-tag">${pick(['bunu hatırlıyor musun?', 'kanka bu neydi?', 'hadi bakalım, bu neydi?'])}</div>
         <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
         ${sentence}
-        <div class="b-actions"><button class="btn sm solid" data-act="reveal">göster</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review', { focus: false });
+        <div class="b-actions"><button class="btn sm solid" data-act="reveal">göster</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review', { ...REVIEW_OPTS, focus: false });
     }
     updateTitle();
   }
@@ -361,6 +378,19 @@
     grade(ok, note);
   }
 
+  function record(w, ok) {
+    const now = Date.now();
+    w.reviews++;
+    w.last = now;
+    if (ok) { w.correct++; w.level = Math.min(INTERVALS.length - 1, w.level + 1); }
+    w.due = now + INTERVALS[w.level] * (0.9 + Math.random() * 0.2);
+    const d = day();
+    d.reviewed++;
+    if (ok) d.correct++;
+    save();
+    render();
+  }
+
   function grade(ok, note) {
     const w = current.w;
     const now = Date.now();
@@ -382,7 +412,7 @@
     const nextTxt = humanize(w.due - now);
     if (ok) {
       setMood('happy', 2200);
-      const praise = ['Harika!', 'Super!', 'Sehr gut!', 'Aferin!', 'Genau!'][Math.floor(Math.random() * 5)];
+      const praise = pick(['helal kanka!', 'Super!', 'Sehr gut!', 'işte bu!', 'Genau!', 'sen bu işi biliyorsun']);
       showBubble(`<div class="b-tag">${praise}</div>
         <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
         <div class="b-mean">${esc(w.tr)}</div>
@@ -390,7 +420,7 @@
         <div class="b-hint">bir dahaki tekrar: ${nextTxt}</div>`, 'feedback', { autoClose: note ? 5000 : 3200 });
     } else {
       setMood('sad', 2500);
-      showBubble(`${wordCard(w, 'doğrusu bu — tekrar soracağım')}
+      showBubble(`${wordCard(w, 'olsun kanka, doğrusu bu — yine soracağım')}
         <div class="b-actions"><button class="btn sm solid" data-act="close">tamam</button></div>`, 'feedback', { autoClose: 20000, focus: false });
     }
     if (state.settings.voice === 'on') say(fullDe(w));
@@ -402,6 +432,226 @@
     if (ms < HOUR) return Math.round(ms / MIN) + ' dk sonra';
     if (ms < DAY) return Math.round(ms / HOUR) + ' saat sonra';
     return Math.round(ms / DAY) + ' gün sonra';
+  }
+
+  /* ---------- arkadaş: düşünce balonları ---------- */
+  const thought = $('thought');
+  let thoughtTimer = 0;
+  let nextThoughtAt = Date.now() + 9000;
+  function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+
+  function think(text, ms = 4500) {
+    if (!bubble.hidden || state.paused) return;
+    clearTimeout(thoughtTimer);
+    thought.textContent = text;
+    thought.hidden = false;
+    thought.style.animation = 'none';
+    void thought.offsetWidth;
+    thought.style.animation = '';
+    placeThought();
+    thoughtTimer = setTimeout(hideThought, ms);
+    nextThoughtAt = Date.now() + 9000 + Math.random() * 12000;
+  }
+  function hideThought() {
+    clearTimeout(thoughtTimer);
+    thought.hidden = true;
+  }
+  function placeThought() {
+    if (thought.hidden) return;
+    const a = scene.headAnchor();
+    const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    const hx = cr.left - sr.left + a.x;
+    const hy = cr.top - sr.top + a.y;
+    const tw = thought.offsetWidth;
+    const left = Math.max(8, Math.min(hx + 6, sr.width - tw - 8));
+    thought.style.left = left + 'px';
+    thought.style.bottom = (sr.height - hy + 26) + 'px';
+    thought.style.setProperty('--tx', Math.max(10, hx - left + 4) + 'px');
+  }
+  window.addEventListener('resize', placeThought);
+
+  function idleThought() {
+    const ws = state.words;
+    const w = ws.length ? pick(ws) : null;
+    const d = day();
+    const h = new Date().getHours();
+    const lines = [
+      'sana yeni kelimeler getiriyorum kanka…',
+      'senin yerine çalışıyorum, sen keyfine bak',
+      'hmm… bugün sana ne öğretsem',
+      'şu daktilo da hiç susmuyor valla',
+      'bir kahve daha mı içsem…',
+      'cümleleri senin için cilalıyorum',
+      'Almanca artikeller… der, die, das… off',
+    ];
+    if (w) {
+      lines.push(`„${fullDe(w)}“ için yeni bir cümle düşünüyorum…`);
+      lines.push(`„${w.de}“ kelimesini unutmadın değil mi?`);
+      lines.push(`${w.tr}… ${fullDe(w)}… tamam not aldım`);
+    }
+    if (d.added) lines.push(`bugün ${d.added} kelime yaptık, fena değiliz!`);
+    if (d.added < state.settings.dailyGoal && d.added > 0) lines.push(`hedefe ${state.settings.dailyGoal - d.added} kelime kaldı kanka`);
+    if (h >= 23 || h < 6) lines.push('geç oldu ama ben buradayım', 'uykum geldi ama devam…');
+    if (h >= 6 && h < 11) lines.push('günaydın kanka, kahveler benden');
+    if (aiQueue.length) lines.push('sana birkaç cümle hazırladım, birazdan…');
+    if (scene.mood !== 'thinking' && Math.random() < 0.5) setMood('thinking', 4500);
+    think(pick(lines));
+  }
+
+  /* ---------- arkadaş: modelden gelen konuşma kuyruğu ---------- */
+  let aiQueue = [];
+  let aiFetching = false;
+  let aiNextFetch = 0;
+  let pendingNew = null;
+  let askCtx = null;
+
+  function focusWords() {
+    const now = Date.now();
+    return [...state.words]
+      .sort((a, b) => (a.due <= now ? 0 : 1) - (b.due <= now ? 0 : 1) || a.level - b.level || a.last - b.last)
+      .slice(0, 8)
+      .map((w) => ({ id: w.id, de: w.de, art: w.art, tr: w.tr, level: w.level }));
+  }
+
+  async function refillQueue() {
+    if (!window.AI || !AI.available() || aiFetching || state.paused || aiQueue.length >= 2 || Date.now() < aiNextFetch) return;
+    aiFetching = true;
+    aiNextFetch = Date.now() + 20 * 1000;
+    try {
+      const n = state.words.length;
+      const wantNew = n === 0 || (n < 20 ? Math.random() < 0.5 : Math.random() < 0.2);
+      const items = await AI.talk(focusWords(), state.words.map((w) => w.de).slice(-150), wantNew, 3);
+      aiQueue.push(...items);
+    } catch (e) { /* model yoksa yerel konuşmaya devam */ }
+    aiFetching = false;
+  }
+
+  function wordById(it) {
+    return state.words.find((w) => w.id === it.id) ||
+      (it.answer && state.words.find((w) => T.key(w.de) === T.key(it.answer))) || null;
+  }
+
+  function nextTalk() {
+    const due = dueWords();
+    // 1) Zamanı gelen kelimeler öncelikli (aralıklı tekrar)
+    if (due.length && (Math.random() < 0.65 || !aiQueue.length)) {
+      const ai = aiQueue.findIndex((it) => it.type === 'cloze' && it.id === due[0].id);
+      if (ai >= 0) return showAiItem(aiQueue.splice(ai, 1)[0]);
+      return startReview(due[0]);
+    }
+    // 2) Modelin hazırladığı konuşmalar
+    while (aiQueue.length) {
+      const it = aiQueue.shift();
+      if (showAiItem(it)) return;
+    }
+    // 3) Yerel yedek: bir kelimeyi örnek cümlesiyle hatırlat
+    if (state.words.length && Math.random() < 0.6) {
+      const w = pick([...state.words].sort((a, b) => a.level - b.level).slice(0, 6));
+      if (w.ex) return showExample(w, w.ex.de, w.ex.tr, '');
+      return startReview(w, 'recall');
+    }
+    nextReviewAt = Date.now() + 8000;
+    idleThought();
+  }
+
+  function showExample(w, de, tr, note) {
+    setMood('talking', 1400);
+    const hl = highlight(de, w.de) || esc(de);
+    showBubble(`<div class="b-tag">${pick(['bak şu cümleye kanka', 'bunu da böyle kullanırsın', 'aklında kalsın diye'])}</div>
+      <div class="b-ex" style="border:0;margin:0;padding:0">„${hl}“ <button class="btn speak" data-act="say-ex" data-text="${esc(de)}" aria-label="Sesli oku">${speakerSvg}</button>${tr ? `<span class="tr">${esc(tr)}</span>` : ''}</div>
+      <div class="b-hint">${w.art ? esc(w.art) + ' ' : ''}<b>${esc(w.de)}</b> = ${esc(w.tr)}</div>
+      ${note ? `<div class="b-say">${esc(note)}</div>` : ''}
+      <div class="b-actions"><button class="btn sm" data-act="close">anladım</button></div>`, 'chat', { autoClose: 18000 });
+    return true;
+  }
+
+  function showAiItem(it) {
+    const s = (v) => (typeof v === 'string' ? v.trim() : '');
+    if (it.type === 'chat' && s(it.text_tr)) { think(s(it.text_tr), 6000); nextReviewAt = Date.now() + 6000; return true; }
+    if (it.type === 'new') return suggestNew(it);
+    const w = wordById(it);
+    if (!w) return false;
+    if (it.type === 'example' && s(it.de)) return showExample(w, s(it.de), s(it.tr), s(it.note_tr));
+    if (it.type === 'cloze' && s(it.de).includes('___') && s(it.answer)) {
+      current = { w, mode: 'cloze', answer: s(it.answer) };
+      setMood('talking', 1200);
+      const parts = s(it.de).split('___').map(esc);
+      showBubble(`<div class="b-tag">${pick(['boşluğu doldur bakalım', 'kanka buraya ne gelir?', 'hadi şunu tamamla'])}</div>
+        <div class="b-ex" style="border:0;margin:0;padding:0">„${parts.join('<span class="gap">&nbsp;</span>')}“</div>
+        <div class="b-hint">ipucu: ${esc(w.tr)}${s(it.tr) ? ` · <i>${esc(s(it.tr))}</i>` : ''}</div>
+        <form class="b-form" data-form="answer"><input name="a" placeholder="hangi kelime?" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
+        <div class="b-actions"><button class="btn sm" data-act="giveup">bilmiyorum</button><button class="btn sm" data-act="later">sonra</button></div>`, 'review', REVIEW_OPTS);
+      return true;
+    }
+    if (it.type === 'ask' && s(it.q_de)) {
+      askCtx = { w, q: s(it.q_de) };
+      setMood('talking', 1400);
+      showBubble(`<div class="b-tag">${pick(['sana bir soru', 'kanka bir şey soracağım', 'hadi biraz konuşalım'])}</div>
+        <div class="b-big" style="font-size:20px">${esc(s(it.q_de))} <button class="btn speak" data-act="say-ex" data-text="${esc(s(it.q_de))}" aria-label="Sesli oku">${speakerSvg}</button></div>
+        ${s(it.q_tr) ? `<div class="b-hint">${esc(s(it.q_tr))}</div>` : ''}
+        <div class="b-hint">„${esc(fullDe(w))}“ kelimesini kullanmaya çalış</div>
+        <form class="b-form" data-form="ask"><input name="a" placeholder="Almanca cevap ver…" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
+        <div class="b-actions"><button class="btn sm" data-act="close">geç</button></div>`, 'review', { autoClose: 120000 });
+      return true;
+    }
+    if (it.type === 'tip' && s(it.text_tr)) {
+      setMood('talking', 1400);
+      showBubble(`<div class="b-tag">küçük bir ipucu · ${esc(fullDe(w))}</div>
+        <div>${esc(s(it.text_tr))}</div>
+        ${s(it.de) ? `<div class="b-ex">„${highlight(s(it.de), w.de) || esc(s(it.de))}“</div>` : ''}
+        <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'chat', { autoClose: 16000 });
+      return true;
+    }
+    return false;
+  }
+
+  function suggestNew(it) {
+    const s = (v) => (typeof v === 'string' ? v.trim() : '');
+    const de = s(it.de).replace(/^(der|die|das)\s+/i, '');
+    if (!de || !s(it.tr) || findExisting(de)) return false;
+    const art = ['der', 'die', 'das'].includes(s(it.art)) ? s(it.art) : '';
+    pendingNew = {
+      de, art, tr: s(it.tr), pos: it.pos || (art ? 'n' : ''), explain_de: s(it.explain_de),
+      ex: it.example && s(it.example.de) ? { de: s(it.example.de), tr: s(it.example.tr), src: 'muse' } : null,
+      dir: 'tr2de', source: 'muse',
+    };
+    setMood('talking', 1500);
+    showBubble(`${wordCard(pendingNew, pick(['sana yeni bir kelime getirdim kanka', 'bunu bilmen lazım bence', 'yeni bir tane buldum']))}
+      <div class="b-actions"><button class="btn sm solid" data-act="addnew">deftere ekle</button><button class="btn sm" data-act="skip">geç</button></div>`, 'chat', { autoClose: 30000 });
+    return true;
+  }
+
+  function addSuggested() {
+    if (!pendingNew) return hideBubble();
+    const w = addWord(pendingNew);
+    pendingNew = null;
+    setMood('happy', 1800);
+    showBubble(`${wordCard(w, 'yazdım kanka ✓ ara ara soracağım')}<div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 9000 });
+    if (state.settings.voice === 'on') say(fullDe(w));
+    celebrateGoal();
+  }
+
+  async function answerAsk(answer) {
+    if (!askCtx) return hideBubble();
+    const { w, q } = askCtx;
+    askCtx = null;
+    hideBubbleQuiet();
+    busy = true;
+    setMood('thinking');
+    think('okuyorum… hmm', 8000);
+    let res = null;
+    try { res = await AI.check(q, fullDe(w), answer); } catch (e) { /* yedek */ }
+    busy = false;
+    const used = new RegExp(w.de.slice(0, Math.max(3, w.de.length - 2)), 'i').test(answer);
+    const ok = res ? !!res.ok : used;
+    record(w, ok);
+    setMood(ok ? 'happy' : 'talking', 2200);
+    const fix = res && typeof res.fix_de === 'string' && res.fix_de.trim() && normalize(res.fix_de) !== normalize(answer) ? res.fix_de.trim() : '';
+    const fb = res && res.feedback_tr ? res.feedback_tr : (ok ? 'helal kanka, güzel cevap!' : `„${fullDe(w)}“ kelimesini de kullanmayı dene kanka`);
+    showBubble(`<div class="b-tag">${ok ? 'süpersin' : 'az kaldı'}</div>
+      <div>${esc(fb)}</div>
+      ${fix ? `<div class="b-ex">daha doğal: „${esc(fix)}“ <button class="btn speak" data-act="say-ex" data-text="${esc(fix)}" aria-label="Sesli oku">${speakerSvg}</button></div>` : ''}
+      <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'feedback', { autoClose: 15000 });
   }
 
   /* ---------- olaylar ---------- */
@@ -420,6 +670,7 @@
     if (sayBtn) { say(sayBtn.dataset.say); return; }
     const b = e.target.closest('[data-act]');
     if (!b) { clearTimeout(bubbleTimer); return; }
+    if (b.dataset.act === 'say-ex') { say(b.dataset.text); return; }
     const act = b.dataset.act;
     if (act === 'close') hideBubble();
     else if (act === 'edit') editWord(b.dataset.id);
@@ -428,14 +679,22 @@
     else if (act === 'knew') grade(true, '');
     else if (act === 'forgot') grade(false, '');
     else if (act === 'giveup') grade(false, '');
-    else if (act === 'later') { if (current) current.w.due = Date.now() + 5 * MIN; save(); current = null; hideBubble(); }
+    else if (act === 'later') { postpone(); hideBubble(); }
+    else if (act === 'addnew') addSuggested();
+    else if (act === 'skip') { pendingNew = null; hideBubble(); }
+    else if (act === 'say-ex') say(b.dataset.text);
   });
 
+  bubble.addEventListener('focusin', () => clearTimeout(bubbleTimer));
   bubble.addEventListener('submit', (e) => {
     e.preventDefault();
     const f = e.target;
     const kind = f.dataset.form;
-    if (kind === 'answer') {
+    if (kind === 'ask') {
+      const v = f.elements.a.value;
+      if (!v.trim()) { f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); return; }
+      answerAsk(v);
+    } else if (kind === 'answer') {
       const v = f.elements.a.value;
       if (!v.trim()) { f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); return; }
       checkAnswer(v);
@@ -493,7 +752,7 @@
     if (busy) return;
     if (!state.words.length) {
       setMood('talking', 1500);
-      showBubble(`<div class="b-tag">merhaba!</div><div>Henüz hafızamda kelime yok. Aşağıya Türkçe ya da Almanca bir kelime yaz — çevirip öğretmeye başlarım.</div>
+      showBubble(`<div class="b-tag">kanka!</div><div>Defterim daha boş. Aşağıya bir kelime yaz ya da biraz bekle, sana ben de yeni kelimeler getiririm.</div>
         <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 12000 });
       return;
     }
@@ -518,10 +777,11 @@
     }
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
     if (!bubbleKind && !typingNow && now >= nextReviewAt) {
-      const due = dueWords();
-      if (due.length) startReview(due[0]);
-      else nextReviewAt = now + 10 * 1000;
+      nextTalk();
+    } else if (!bubbleKind && !typingNow && thought.hidden && now >= nextThoughtAt) {
+      idleThought();
     }
+    refillQueue();
     updateTitle();
   }, 1000);
 
@@ -629,7 +889,7 @@
     setTimeout(() => {
       if (bubbleKind || busy) return;
       setMood('talking', 1500);
-      showBubble(`<div class="b-tag">hallo!</div><div>Aşağıya bir kelime yaz: Türkçe yazarsan Almancasını, Almanca yazarsan Türkçesini söylerim. Sonra ara ara sorarım.</div>
+      showBubble(`<div class="b-tag">selam kanka!</div><div>Ben buradayım, senin için Almanca çalışıyorum. Aşağıya bir kelime yaz — Türkçe yazarsan Almancasını, Almanca yazarsan Türkçesini söylerim. Sonra gün boyu cümleler getirir, sorular sorarım.</div>
         <div class="b-actions"><button class="btn sm" data-act="close">anlaştık</button></div>`, 'info', { autoClose: 20000, focus: false });
     }, 1200);
   }
@@ -637,5 +897,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); } };
 })();

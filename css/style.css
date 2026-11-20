@@ -146,6 +146,8 @@ canvas {
   box-shadow: 3px 3px 0 var(--ink);
   transform-origin: var(--tail, 50%) 100%;
   animation: pop 0.22s cubic-bezier(.2, 1.4, .4, 1);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .bubble[hidden] { display: none; }
 .bubble::before, .bubble::after {
@@ -160,7 +162,7 @@ canvas {
 .bubble::after { bottom: -7px; border-top: 9px solid var(--bg-hi); left: calc(var(--tail, 50%) - 7px); border-width: 9px 7px 0; }
 @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-.b-tag { font-size: 12.5px; text-transform: lowercase; letter-spacing: 0.04em; color: var(--ink-2); margin-bottom: 3px; }
+.b-tag { font-size: 12.5px; letter-spacing: 0.03em; color: var(--ink-2); margin-bottom: 3px; }
 .b-word { font-size: 23px; font-style: italic; font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .b-word .art { font-style: normal; font-weight: 400; font-size: 17px; color: var(--ink-2); }
 .b-mean { font-size: 16px; margin-top: 1px; }
@@ -193,6 +195,47 @@ canvas {
 .b-big { font-size: 26px; font-style: italic; }
 .shake { animation: shake 0.3s; }
 @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+
+/* ---------- düşünce balonu ---------- */
+.thought {
+  position: absolute;
+  z-index: 4;
+  max-width: min(230px, calc(100% - 16px));
+  background: var(--bg-hi);
+  border: 2px dashed var(--ink);
+  border-radius: 16px;
+  padding: 6px 11px 7px;
+  font-size: 14.5px;
+  font-style: italic;
+  line-height: 1.25;
+  color: var(--ink);
+  pointer-events: none;
+  transform-origin: var(--tx, 20px) 100%;
+  animation: think-in 0.35s ease-out;
+}
+.thought[hidden] { display: none; }
+.thought::before, .thought::after {
+  content: '';
+  position: absolute;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--bg-hi);
+}
+.thought::before { width: 9px; height: 9px; bottom: -13px; left: calc(var(--tx, 20px) - 2px); }
+.thought::after { width: 5px; height: 5px; bottom: -22px; left: calc(var(--tx, 20px) - 8px); }
+@keyframes think-in { from { opacity: 0; transform: translateY(6px) scale(0.9); } }
+
+.b-say { font-style: italic; font-size: 15px; margin: 1px 0 4px; }
+.b-simple {
+  margin-top: 7px;
+  padding: 6px 8px;
+  border: 1.5px solid var(--ink);
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1.3;
+}
+.b-simple span { display: block; font-size: 11.5px; letter-spacing: 0.05em; color: var(--ink-2); margin-bottom: 1px; }
+.b-ex .speak { display: inline-grid; place-items: center; vertical-align: middle; margin-left: 2px; }
 
 /* ---------- alt kısım ---------- */
 .bottom { display: flex; align-items: center; gap: 8px; padding-top: 12px; }
@@ -280,7 +323,10 @@ body.paused #pauseBtn .i-pause { display: none; }
   .stage { margin: 0 -14px; padding-top: 118px; }
   .count em { font-size: 27px; }
   .streak { font-size: 22px; }
-  .bubble { font-size: 15px; }
+  .bubble { font-size: 14.5px; padding: 9px 11px 10px; }
+  .b-word { font-size: 21px; }
+  .b-simple, .b-ex { font-size: 14.5px; }
+  .b-ex .tr, .b-hint { font-size: 13.5px; }
 }
 @media (min-width: 700px) {
   .card { width: 560px; }

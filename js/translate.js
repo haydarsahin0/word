@@ -180,6 +180,10 @@
    */
   async function lookup(q) {
     q = q.trim().replace(/\s+/g, ' ');
+    // 1) Meta Muse Ember (anlam, basit Almanca açıklama, örnek cümle)
+    if (window.AI && window.AI.available()) {
+      try { return await window.AI.lookup(q); } catch (e) { /* yedeklere geç */ }
+    }
     const seed = seedLookup(q);
     if (seed) return { ...seed, alts: [], source: 'sözlük' };
 
