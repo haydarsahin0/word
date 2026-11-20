@@ -27,6 +27,7 @@
         s.profile = s.profile && typeof s.profile === 'object' ? s.profile : null;
         s.profileAt = s.profileAt || 0;
         s.logAtProfile = s.logAtProfile || 0;
+        s.cost = s.cost && typeof s.cost === 'object' ? s.cost : { days: {}, view: 'day' };
         s.words.forEach((w) => {
           if (!Array.isArray(w.pool)) w.pool = w.ex ? [{ de: w.ex.de, tr: w.ex.tr || '', n: 0, last: 0 }] : [];
           if (!Array.isArray(w.asked)) w.asked = [];
@@ -37,7 +38,7 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on' }, paused: false };
   }
   function save() {
     try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* depolama yok */ }
@@ -119,6 +120,43 @@
   const cooling = (w) => (w.id === lastWordId && state.words.length > 1) || Date.now() - (w.seenAt || 0) < cooldownMs();
   const seenTodayOf = (w) => (w.seenDay === todayKey() ? w.seenToday || 0 : 0);
 
+  /* ---------- canlı maliyet (sağ üst) ---------- */
+  // Muse Ember fiyatı (1 milyon token başına, USD). Meta panelindeki fiyat farklıysa burayı değiştir.
+  const PRICE_IN = 0.10 / 1e6, PRICE_OUT = 0.50 / 1e6;
+  const COST_VIEWS = { day: 'heute', month: 'diesen Monat', total: 'insgesamt' };
+  function addCost(u) {
+    const usd = (u.in || 0) * PRICE_IN + (u.out || 0) * PRICE_OUT;
+    const k = todayKey();
+    const d = state.cost.days[k] || (state.cost.days[k] = { usd: 0, in: 0, out: 0, calls: 0 });
+    d.usd += usd; d.in += u.in || 0; d.out += u.out || 0; d.calls += u.calls || 1;
+    save();
+    renderCost(true);
+  }
+  function costFor(view) {
+    const k = todayKey();
+    const days = Object.entries(state.cost.days);
+    if (view === 'day') return (state.cost.days[k] || {}).usd || 0;
+    if (view === 'month') return days.filter(([d]) => d.slice(0, 7) === k.slice(0, 7)).reduce((a, [, v]) => a + v.usd, 0);
+    return days.reduce((a, [, v]) => a + v.usd, 0);
+  }
+  function fmtUsd(v) {
+    const digits = v < 0.01 ? 4 : v < 1 ? 3 : 2;
+    return v.toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits }) + ' $';
+  }
+  function renderCost(bump) {
+    const view = state.cost.view || 'day';
+    $('costVal').textContent = fmtUsd(costFor(view));
+    $('costLbl').textContent = COST_VIEWS[view];
+    if (bump) { const b = $('costBtn'); b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+  }
+  if (window.AI && AI.onUsage) AI.onUsage(addCost);
+  $('costBtn').addEventListener('click', () => {
+    const order = ['day', 'month', 'total'];
+    state.cost.view = order[(order.indexOf(state.cost.view || 'day') + 1) % order.length];
+    save();
+    renderCost();
+  });
+
   /* ---------- ses efektleri ---------- */
   if (window.SFX) SFX.setEnabled(() => state.settings.sfx !== 'off');
   const sfx = (n) => window.SFX && SFX.play(n);
@@ -132,6 +170,7 @@
   };
   function soundFor(b) {
     if (b.id === 'pauseBtn') return state.paused ? 'resume' : 'pause';
+    if (b.id === 'costBtn') return 'choice' + ['day', 'month', 'total'].indexOf(state.cost.view || 'day');
     if (ID_SOUNDS[b.id]) return ID_SOUNDS[b.id];
     if (b.matches('label.btn') && b.querySelector('#importFile')) return 'import';
     if (b.dataset.say) return 'bell';
@@ -181,6 +220,7 @@
     $('dailyBar').style.width = dp + '%';
     $('dailyBar').closest('.meter').classList.toggle('done', dp >= 100);
     $('streak').textContent = streak();
+    renderCost();
     document.body.classList.toggle('paused', !!state.paused);
     renderTicker();
   }
@@ -1253,7 +1293,9 @@
   });
   $('resetBtn').addEventListener('click', () => {
     if (!confirm('Tüm kelimeler ve ilerleme silinsin mi?')) return;
+    const keepCost = state.cost;
     state = defaults();
+    state.cost = keepCost;
     save(); render(); renderSheet();
   });
 

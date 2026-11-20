@@ -7,6 +7,7 @@
   let profileProvider = () => ({ text: '', interests: [] });
 
   let activeCheck = () => true;
+  let usageCb = null;
 
   async function call(action, payload, ms = 25000) {
     if (Date.now() < downUntil) throw new Error('ai_down');
@@ -29,6 +30,7 @@
         throw new Error(lastError);
       }
       lastError = '';
+      if (j && j._usage && usageCb) { try { usageCb(j._usage, action); } catch (e) { /* yok say */ } }
       return j;
     } catch (e) {
       if (e.name === 'AbortError' || e instanceof TypeError) {
@@ -81,6 +83,7 @@
     lookup, talk, check, profile,
     setProfileProvider: (fn) => { profileProvider = fn; },
     setActiveCheck: (fn) => { activeCheck = fn; },
+    onUsage: (fn) => { usageCb = fn; },
     available: () => Date.now() >= downUntil,
     lastError: () => lastError,
     endpoint: ENDPOINT,
