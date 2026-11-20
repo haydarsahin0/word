@@ -3,8 +3,10 @@
   const STORE = 'kelime-defteri-v1';
   const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR;
   // Aralıklı tekrar seviyeleri (Leitner benzeri)
-  const INTERVALS = [45 * 1000, 3 * MIN, 15 * MIN, HOUR, 6 * HOUR, DAY, 3 * DAY, 7 * DAY, 16 * DAY, 35 * DAY, 90 * DAY];
-  const MASTERED = 5;
+  const INTERVALS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR, DAY, 3 * DAY, 7 * DAY, 16 * DAY, 35 * DAY, 90 * DAY, 180 * DAY];
+  const MASTERED = 5; // 3 gün aralığına ulaşan kelime "öğrenildi" sayılır
+  const COOLDOWN = 4 * MIN; // aynı kelime bu süre içinde tekrar gösterilmez
+  const IDLE_MS = 8 * MIN; // bu kadar dokunulmazsa kanka uyur, model çağrılmaz
   const GAPS = { often: 10 * 1000, normal: 22 * 1000, rare: 60 * 1000 };
 
   const $ = (id) => document.getElementById(id);
@@ -91,6 +93,22 @@
   }
   if (mergeDuplicates()) save();
   day().added = todayAdded();
+
+  /* ---------- sadece sen bakarken çalış ---------- */
+  let lastInteraction = Date.now();
+  let dormant = false;
+  const isActive = () => !document.hidden && Date.now() - lastInteraction < IDLE_MS;
+  ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach((ev) =>
+    document.addEventListener(ev, () => { lastInteraction = Date.now(); if (dormant) wakeUp(); }, { passive: true, capture: true }));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { lastInteraction = Date.now(); if (dormant) wakeUp(); }
+  });
+  if (window.AI && AI.setActiveCheck) AI.setActiveCheck(isActive);
+
+  /* ---------- aynı kelimeyi üst üste getirme ---------- */
+  let lastWordId = null;
+  function touch(w) { if (w) { w.seenAt = Date.now(); lastWordId = w.id; } }
+  const cooling = (w) => w.id === lastWordId || Date.now() - (w.seenAt || 0) < COOLDOWN;
 
   /* ---------- ses efektleri ---------- */
   if (window.SFX) SFX.setEnabled(() => state.settings.sfx !== 'off');
@@ -440,6 +458,7 @@
     };
     if (res.ex) markShown(res.ex.de);
     state.words.push(w);
+    touch(w);
     day().added = todayAdded();
     save();
     render();
@@ -517,6 +536,7 @@
     const exW = ex && wordIn(ex.de, w);
     if (mode === 'cloze' && !exW) mode = 'reverse';
     w.lastMode = mode;
+    touch(w);
     current = { w, mode, ex, revealed: false };
     setMood('talking', 1200);
     if (mode === 'cloze') {
@@ -583,39 +603,40 @@
     grade(ok, note);
   }
 
-  function record(w, ok) {
+  /** Sonucu işle. Seviye sadece tekrar zamanı gelmiş kelimede artar; erken bilmek "ekstra pratik"tir. */
+  function applyResult(w, ok) {
     const now = Date.now();
+    const wasDue = w.due <= now + 30 * 1000;
+    let advanced = false;
     w.reviews++;
     w.last = now;
-    if (ok) { w.correct++; w.level = Math.min(INTERVALS.length - 1, w.level + 1); }
-    w.due = now + INTERVALS[w.level] * (0.9 + Math.random() * 0.2);
+    if (ok) {
+      w.correct++;
+      if (wasDue) {
+        w.level = Math.min(INTERVALS.length - 1, w.level + 1);
+        w.due = now + INTERVALS[w.level] * (0.9 + Math.random() * 0.2);
+        advanced = true;
+      }
+    } else {
+      w.lapses++;
+      w.level = w.level >= 4 ? 2 : 0;
+      w.due = now + INTERVALS[w.level];
+    }
     const d = day();
     d.reviewed++;
     if (ok) d.correct++;
     save();
     render();
+    return advanced;
   }
+  function record(w, ok) { return applyResult(w, ok); }
 
   function grade(ok, note) {
     const w = current.w;
     const shownEx = current.ex || null;
     logEvent('quiz', { mode: current.mode, de: fullDe(w), tr: w.tr, ok, answer: current.input || (ok ? '(bildim)' : '(bilemedim)'), expected: current.answer });
     const now = Date.now();
-    w.reviews++;
-    w.last = now;
-    if (ok) {
-      w.correct++;
-      w.level = Math.min(INTERVALS.length - 1, w.level + 1);
-    } else {
-      w.lapses++;
-      w.level = w.level >= 4 ? 2 : 0;
-    }
-    w.due = now + INTERVALS[w.level] * (ok ? 0.9 + Math.random() * 0.2 : 1);
-    const d = day();
-    d.reviewed++;
-    if (ok) d.correct++;
-    save();
-    render();
+    const advanced = applyResult(w, ok);
     const nextTxt = humanize(w.due - now);
     sfx(ok ? 'ok' : 'no');
     if (ok) {
@@ -625,7 +646,7 @@
         <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
         <div class="b-mean">${esc(w.tr)}</div>
         ${note ? `<div class="b-hint">${note}</div>` : ''}
-        <div class="b-hint">bir dahaki tekrar: ${nextTxt}</div>`, 'feedback', { autoClose: note ? 5000 : 3200 });
+        <div class="b-hint">${advanced ? `seviye atladı · bir dahaki tekrar: ${nextTxt}` : `ekstra pratik ✓ · asıl tekrar: ${nextTxt}`}</div>`, 'feedback', { autoClose: note ? 5000 : 3200 });
     } else {
       setMood('sad', 2500);
       showBubble(`${wordCard(w, 'olsun kanka, doğrusu bu — yine soracağım', { ex: shownEx })}
@@ -749,8 +770,10 @@
     aiNextFetch = Date.now() + 20 * 1000;
     try {
       const n = state.words.length;
-      const wantNew = n === 0 || (n < 20 ? Math.random() < 0.5 : Math.random() < 0.2);
-      const items = await AI.talk(focusWords(), state.words.map((w) => w.de).slice(-150), wantNew, 3);
+      const wantNew = n < 8 || (n < 20 ? Math.random() < 0.5 : Math.random() < 0.2);
+      const known = [...state.words.map((w) => w.de), ...(state.skipped || [])].slice(-150);
+      const items = await AI.talk(focusWords(), known, wantNew, 3);
+      items.forEach((it) => { it._t = Date.now(); });
       // daha önce gösterilenleri ele, aynı kelimeyi arka arkaya koyma
       items.filter((it) => !seen(it.de) && !seen(it.q_de) && !seen(it.text_tr) && !aiQueue.some((q) => sentKey(q.de || q.q_de || q.text_tr) === sentKey(it.de || it.q_de || it.text_tr)))
         .forEach((it) => aiQueue.push(it));
@@ -765,7 +788,7 @@
   }
 
   function nextTalk() {
-    const due = dueWords();
+    const due = dueWords().filter((w) => !cooling(w));
     // 1) Zamanı gelen kelimeler öncelikli (aralıklı tekrar)
     if (due.length && (Math.random() < 0.65 || !aiQueue.length)) {
       const w0 = due[0];
@@ -775,26 +798,37 @@
       if (!freshSentences(w0)) { aiNextFetch = 0; return startReview(w0, w0.lastMode === 'reverse' ? 'recall' : 'reverse'); }
       return startReview(w0);
     }
-    // 2) Modelin hazırladığı konuşmalar
-    while (aiQueue.length) {
-      const it = aiQueue.shift();
+    // 2) Modelin hazırladıkları — kelimesi "dinlenen" maddeler sırada bekler
+    aiQueue = aiQueue.filter((it) => Date.now() - (it._t || 0) < 20 * MIN);
+    for (let i = 0; i < aiQueue.length; i++) {
+      const it = aiQueue[i];
+      if (it.type !== 'new' && it.type !== 'chat') {
+        const w = wordById(it);
+        if (w && cooling(w)) continue;
+      }
+      aiQueue.splice(i, 1);
+      i--;
       if (showAiItem(it)) return;
     }
-    // 3) Yerel yedek: bir kelimeyi örnek cümlesiyle hatırlat
-    if (state.words.length && Math.random() < 0.6) {
-      const w = pick([...state.words].sort((a, b) => a.level - b.level || a.last - b.last).slice(0, 6));
+    // 3) Yerel yedek: dinlenmeyen bir kelimeyi örnek cümlesiyle hatırlat
+    const rested = state.words.filter((w) => !cooling(w));
+    if (rested.length && Math.random() < 0.5) {
+      const w = pick([...rested].sort((a, b) => a.level - b.level || a.last - b.last).slice(0, 6));
       if (freshSentences(w)) {
         const ex = nextSentence(w, true);
         return showExample(w, ex.de, ex.tr, '', true);
       }
-      return startReview(w, w.lastMode === 'reverse' ? 'recall' : 'reverse');
+      if (w.due <= Date.now() || state.words.length >= 6) return startReview(w, w.lastMode === 'reverse' ? 'recall' : 'reverse');
     }
+    // 4) Kelime azsa aynılarını döndürme: modelden yeni kelime iste, bu arada kanka çalışsın
+    if (state.words.length < 8) aiNextFetch = Math.min(aiNextFetch, Date.now() + 3000);
     nextReviewAt = Date.now() + 8000;
     idleThought();
   }
 
   function showExample(w, de, tr, note, already) {
     if (!already) { markShown(de); addToPool(w, de, tr); save(); }
+    touch(w);
     setMood('talking', 1400);
     const hl = highlight(de, w.de) || esc(de);
     showBubble(`<div class="b-tag">${pick(['bak şu cümleye kanka', 'bunu da böyle kullanırsın', 'aklında kalsın diye'])}</div>
@@ -820,6 +854,7 @@
       addToPool(w, full, s(it.tr));
       save();
       w.lastMode = 'cloze';
+      touch(w);
       current = { w, mode: 'cloze', answer: s(it.answer), ex: { de: full, tr: s(it.tr) } };
       setMood('talking', 1200);
       const parts = s(it.de).split('___').map(esc);
@@ -832,6 +867,7 @@
     }
     if (it.type === 'ask' && s(it.q_de)) {
       askCtx = { w, q: s(it.q_de) };
+      touch(w);
       markShown(s(it.q_de));
       w.asked = [...(w.asked || []), s(it.q_de)].slice(-10);
       save();
@@ -846,6 +882,7 @@
     }
     if (it.type === 'tip' && s(it.text_tr)) {
       markShown(s(it.text_tr));
+      touch(w);
       if (s(it.de) && wordIn(s(it.de), w)) addToPool(w, s(it.de), '');
       setMood('talking', 1400);
       showBubble(`<div class="b-tag">küçük bir ipucu · ${esc(fullDe(w))}</div>
@@ -937,7 +974,14 @@
     else if (act === 'giveup') grade(false, '');
     else if (act === 'later') { if (current) logEvent('postponed', { de: fullDe(current.w), mode: current.mode }); postpone(); hideBubble(); }
     else if (act === 'addnew') addSuggested();
-    else if (act === 'skip') { if (pendingNew) logEvent('skipped_suggestion', { de: pendingNew.de, tr: pendingNew.tr }); pendingNew = null; hideBubble(); }
+    else if (act === 'skip') {
+      if (pendingNew) {
+        logEvent('skipped_suggestion', { de: pendingNew.de, tr: pendingNew.tr });
+        state.skipped = [...(state.skipped || []), pendingNew.de].slice(-100);
+        save();
+      }
+      pendingNew = null; hideBubble();
+    }
     else if (act === 'say-ex') say(b.dataset.text);
   });
 
@@ -1023,8 +1067,9 @@
         <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 12000 });
       return;
     }
-    const due = dueWords();
-    const w = due[0] || [...state.words].sort((a, b) => a.level - b.level || a.last - b.last)[0];
+    const due = dueWords().filter((x) => !cooling(x));
+    const rested = state.words.filter((x) => !cooling(x));
+    const w = due[0] || [...(rested.length ? rested : state.words)].sort((a, b) => a.level - b.level || a.last - b.last)[0];
     startReview(w);
   }
   $('askBtn').addEventListener('click', askNow);
@@ -1034,6 +1079,7 @@
   setInterval(() => {
     const now = Date.now();
     if (state.paused) { scene.setMood('sleep'); return; }
+    if (!isActive()) { if (!dormant) fallAsleep(); return; } // bakmıyorsan hiçbir şey çağrılmaz
     if (busy) return;
     if (!bubbleKind && now > moodUntil) {
       const r = Math.random();
@@ -1052,6 +1098,20 @@
     if (now % 15000 < 1000) maybeUpdateProfile();
     updateTitle();
   }, 1000);
+
+  function fallAsleep() {
+    dormant = true;
+    scene.setMood('sleep');
+    if (!document.hidden && bubble.hidden) think('sen yokken biraz kestiriyorum… dokununca uyanırım', 12000);
+  }
+  function wakeUp() {
+    dormant = false;
+    if (state.paused) return;
+    hideThought();
+    setMood('happy', 1500);
+    think(pick(['geldin kanka! devam edelim', 'aa hoş geldin, seni bekliyordum', 'uyandım, hadi bakalım']), 4000);
+    nextReviewAt = Math.max(nextReviewAt, Date.now() + 6000);
+  }
 
   function updateTitle() {
     const n = dueWords().length;
@@ -1201,5 +1261,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true) };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive() };
 })();

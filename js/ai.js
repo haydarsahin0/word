@@ -6,8 +6,12 @@
   let lastError = '';
   let profileProvider = () => ({ text: '', interests: [] });
 
+  let activeCheck = () => true;
+
   async function call(action, payload, ms = 25000) {
     if (Date.now() < downUntil) throw new Error('ai_down');
+    // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri hariç
+    if (action !== 'lookup' && !activeCheck()) throw new Error('inactive');
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), ms);
     try {
@@ -76,6 +80,7 @@
   window.AI = {
     lookup, talk, check, profile,
     setProfileProvider: (fn) => { profileProvider = fn; },
+    setActiveCheck: (fn) => { activeCheck = fn; },
     available: () => Date.now() >= downUntil,
     lastError: () => lastError,
     endpoint: ENDPOINT,

@@ -29,6 +29,17 @@ Model şunları yapar:
 - gün boyu hep yeni örnek cümleler, boşluk doldurma, Almanca sorular (cevabını değerlendirir), ipuçları ve yeni kelime önerileri,
 - hepsini samimi bir "kanka" diliyle; daha önce gösterilen cümleler tekrar edilmez.
 
+### Sadece sen bakarken çalışır
+
+Sekme arka plandayken, başka bir uygulamaya geçtiğinde ya da 8 dakika ekrana dokunmadığında kanka uyur ve
+modele hiçbir istek gitmez (yalnızca senin yazdığın kelimenin çevirisi her zaman çalışır). Dokununca uyanır.
+
+### Öğrenme hızı
+
+Seviye sadece tekrar zamanı gelmiş kelimeyi bildiğinde artar (2 dk → 10 dk → 1 saat → 5 saat → 1 gün → 3 gün …);
+erken gelen sorular "ekstra pratik" sayılır. Aynı kelime 4 dakika içinde tekrar gösterilmez, üst üste hiç gelmez;
+kelime azken kanka aynılarını döndürmek yerine yeni kelime önerir.
+
 ### Seni tanıması
 
 Uygulama yaptıklarını küçük bir günlükte tutar: sorduğun kelimeler (yazdığın hâliyle), quiz sonuçları,
