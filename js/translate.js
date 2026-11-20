@@ -140,6 +140,7 @@
   }
 
   const ACC = { der: 'den', die: 'die', das: 'das' };
+  const DAT = { der: 'dem', die: 'der', das: 'dem' };
   function templateSentence(de, pos, art) {
     const pick = (a) => a[Math.floor(Math.random() * a.length)];
     if (pos === 'n' || (!pos && /^[A-ZÄÖÜ]/.test(de))) {
@@ -149,15 +150,38 @@
         `Wo ist ${a} ${de}?`,
         `Ich sehe ${ACC[a]} ${de}.`,
         `${capitalize(a)} ${de} gefällt mir sehr.`,
+        `Hast du ${ACC[a]} ${de} gesehen?`,
+        `Ich brauche ${ACC[a]} ${de} morgen.`,
+        `Mit ${DAT[a]} ${de} ist alles einfacher.`,
+        `${capitalize(a)} ${de} war gestern nicht da.`,
+        `Kannst du mir ${ACC[a]} ${de} zeigen?`,
+        `Wir sprechen heute über ${ACC[a]} ${de}.`,
       ]);
     }
     if (pos === 'v' || /(en|ern|eln)$/.test(de)) {
-      return pick([`Ich möchte heute ${de}.`, `Wir können morgen zusammen ${de}.`, `Ich will nicht ${de}.`]);
+      return pick([
+        `Ich möchte heute ${de}.`,
+        `Wir können morgen zusammen ${de}.`,
+        `Ich will nicht ${de}.`,
+        `Kannst du heute Abend ${de}?`,
+        `Sie muss jetzt ${de}.`,
+        `Am Wochenende wollen wir ${de}.`,
+        `Ich werde bald ${de}.`,
+        `Darf ich hier ${de}?`,
+      ]);
     }
     if (pos === 'a') {
-      return pick([`Das ist wirklich ${de}.`, `Heute ist alles so ${de}.`, `Er ist sehr ${de}.`]);
+      return pick([
+        `Das ist wirklich ${de}.`,
+        `Heute ist alles so ${de}.`,
+        `Er ist sehr ${de}.`,
+        `Ich finde das ziemlich ${de}.`,
+        `War der Film ${de}?`,
+        `Meine Nachbarin ist immer ${de}.`,
+        `Das Essen war nicht ${de}.`,
+      ]);
     }
-    return `Ich habe das Wort „${de}“ heute gelernt.`;
+    return pick([`Ich habe das Wort „${de}“ heute gelernt.`, `„${de}“ höre ich oft in Berlin.`, `Sag mal: „${de}“!`]);
   }
 
   async function findExample(de, pos, art, online) {

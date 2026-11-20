@@ -156,6 +156,11 @@ create exactly {N} short, varied teaching moments. Mix these types:
 - {"type":"tip","id":"<word id>","text_tr":"<max 2 short, casual Turkish sentences: article, plural, conjugation, a false friend, or a memory trick>","de":"<one short German example>"}
 - {"type":"chat","text_tr":"<one casual Turkish friend line (max 14 words): what you are doing for them right now, a cheer, or a tiny joke about one of their words>"}
 - {"type":"new","de":"<a useful everyday A2 word NOT in the known list, without article>","art":"der|die|das or empty","pos":"n|v|a|d","tr":"<Turkish>","explain_de":"<max 2 very simple German sentences>","example":{"de":"<sentence containing exactly that form>","tr":"<Turkish>"}}
+Each word may have an "avoid" list: sentences/questions the learner has ALREADY seen. Never reuse, copy or closely
+paraphrase them — every sentence must be brand new. Keep it fresh and varied:
+- situation/theme for this batch: {THEME} (but stay natural for each word),
+- vary tense (Präsens, Perfekt, Futur, modal verbs), person (ich, du, er/sie, wir, ihr), and sentence type (statement, question, negation, imperative),
+- use different collocations and contexts than in the avoid list, and different item types for different words.
 Prefer words with a low level (they need practice). Use each word at most once. Include at most one \"chat\" item. {NEW_HINT}
 Return: {"items":[ ... ]}`;
 
@@ -163,6 +168,14 @@ const CHECK = `${PERSONA}
 
 You asked the learner a question in German. Judge their answer kindly. Small mistakes are fine if it is understandable.
 Return: {"ok": true|false (did they answer sensibly and use German reasonably?), "fix_de": "<a corrected / more natural version of their answer, or empty if already perfect>", "feedback_tr": "<one short, warm, casual Turkish friend sentence ('helal kanka' vibe if good, gentle if not)>"}`;
+
+const THEMES = [
+  "at home in the morning", "in the supermarket", "at work / in the office", "on the train or bus",
+  "cooking and eating", "with friends on the weekend", "at the doctor", "on holiday", "the weather and seasons",
+  "shopping for clothes", "sports and hobbies", "at a café", "phone calls and messages", "family life",
+  "at school or a language course", "in the city, asking for directions", "feelings and plans", "a funny little story",
+  "in the park", "at a party", "money and banking", "renting a flat", "the internet and phones", "the evening routine",
+];
 
 /* ---------- sunucu ---------- */
 Deno.serve(async (req) => {
@@ -201,13 +214,15 @@ Deno.serve(async (req) => {
           art: String(w.art ?? "").slice(0, 3),
           tr: String(w.tr ?? "").slice(0, 40),
           level: Number(w.level) || 0,
+          avoid: (Array.isArray(w.avoid) ? w.avoid : []).slice(-8).map((a: any) => String(a).slice(0, 140)),
         }));
         const known = (Array.isArray(body.known) ? body.known : []).slice(0, 150).map((s: any) => String(s).slice(0, 30));
         const n = Math.max(1, Math.min(5, Number(body.n) || 3));
         const newHint = body.wantNew
           ? 'Include exactly one item of type "new".'
           : 'Do not use type "new" unless the word list is empty.';
-        const sys = TALK.replace("{N}", String(n)).replace("{NEW_HINT}", newHint);
+        const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
+        const sys = TALK.replace("{N}", String(n)).replace("{NEW_HINT}", newHint).replace("{THEME}", theme);
         const user = `Learner's words (focus):\n${JSON.stringify(words)}\n\nAll known words (do not suggest these as new):\n${known.join(", ")}`;
         const out = await askJson(sys, user, 0.9);
         return json({ items: Array.isArray(out?.items) ? out.items : [] }, 200, h);
