@@ -54,6 +54,44 @@
   }
   const fullDe = (w) => (w.art ? w.art + ' ' : '') + w.de;
 
+  /* ---------- aynı kelime tek kayıt ---------- */
+  const deKey = (de) => String(de || '').normalize('NFC').trim().toLowerCase().replace(/^(der|die|das)\s+/, '').replace(/\s+/g, ' ');
+  function findByDe(de) {
+    const k = deKey(de);
+    return k ? state.words.find((w) => deKey(w.de) === k) : null;
+  }
+  const isToday = (ts) => todayKey(new Date(ts)) === todayKey();
+  function todayAdded() {
+    return state.words.filter((w) => isToday(w.created)).length;
+  }
+  /** Eski sürümlerden kalan çift kayıtları birleştir */
+  function mergeDuplicates() {
+    const byKey = new Map();
+    const keep = [];
+    let merged = 0;
+    for (const w of state.words) {
+      const k = deKey(w.de);
+      const first = byKey.get(k);
+      if (!first) { byKey.set(k, w); keep.push(w); continue; }
+      merged++;
+      first.level = Math.max(first.level || 0, w.level || 0);
+      first.reviews = (first.reviews || 0) + (w.reviews || 0);
+      first.correct = (first.correct || 0) + (w.correct || 0);
+      first.lapses = (first.lapses || 0) + (w.lapses || 0);
+      first.last = Math.max(first.last || 0, w.last || 0);
+      first.created = Math.min(first.created || Date.now(), w.created || Date.now());
+      ['art', 'plural', 'meaning_tr', 'explain_de', 'say_tr', 'pos', 'ex'].forEach((f) => { if (!first[f] && w[f]) first[f] = w[f]; });
+      first.alts = [...new Set([...(first.alts || []), ...(w.alts || [])])].slice(0, 3);
+      first.asked = [...(first.asked || []), ...(w.asked || [])].slice(-10);
+      const seenPool = new Set((first.pool || []).map((x) => x.de));
+      (w.pool || []).forEach((x) => { if (!seenPool.has(x.de)) { first.pool.push(x); seenPool.add(x.de); } });
+    }
+    state.words = keep;
+    return merged;
+  }
+  if (mergeDuplicates()) save();
+  day().added = todayAdded();
+
   /* ---------- ses efektleri ---------- */
   if (window.SFX) SFX.setEnabled(() => state.settings.sfx !== 'off');
   const sfx = (n) => window.SFX && SFX.play(n);
@@ -106,13 +144,13 @@
   function render() {
     const total = state.words.length;
     const goal = state.settings.totalGoal;
-    const d = day();
+    const added = todayAdded();
     $('total').textContent = `${total.toLocaleString('tr-TR')} / ${goal.toLocaleString('tr-TR')}`;
     const pct = Math.min(100, Math.floor((total / goal) * 100));
     $('totalPct').textContent = '%' + pct;
     $('totalBar').style.width = pct + '%';
-    $('today').textContent = `${d.added} / ${state.settings.dailyGoal}`;
-    const dp = Math.min(100, (d.added / state.settings.dailyGoal) * 100);
+    $('today').textContent = `${added} / ${state.settings.dailyGoal}`;
+    const dp = Math.min(100, (added / state.settings.dailyGoal) * 100);
     $('dailyBar').style.width = dp + '%';
     $('dailyBar').closest('.meter').classList.toggle('done', dp >= 100);
     $('streak').textContent = streak();
@@ -125,9 +163,17 @@
     const items = recent.length
       ? recent.map((w) => `<span><b>${esc(fullDe(w))}</b> — ${esc(w.tr)}</span>`).join('')
       : '<span>Bir kelime yaz, birlikte öğrenelim</span><span>Türkçe ⇄ Deutsch</span><span>Schritt für Schritt</span>';
-    const html = items + items;
     const el = $('ticker');
-    if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+    if (el.dataset.items === items) return;
+    el.dataset.items = items;
+    el.classList.remove('scroll');
+    el.innerHTML = items;
+    // sadece sığmıyorsa kaydır; kesintisiz dönsün diye o zaman iki kopya koy
+    if (el.scrollWidth > el.parentElement.clientWidth) {
+      el.innerHTML = items + items;
+      el.style.animationDuration = Math.max(20, recent.length * 5) + 's';
+      el.classList.add('scroll');
+    }
   }
 
   /* ---------- balon ---------- */
@@ -331,14 +377,7 @@
     q = q.trim();
     if (!q || busy) return;
     const existing = findExisting(q);
-    if (existing) {
-      logEvent('lookup_again', { q, de: fullDe(existing), level: existing.level });
-      setMood('happy', 1800);
-      showBubble(`${wordCard(existing, 'bunu zaten biliyoruz kanka ✓', { ex: nextSentence(existing, false, false) || existing.ex })}
-        <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 15000 });
-      if (state.settings.voice === 'on') say(fullDe(existing));
-      return;
-    }
+    if (existing) return showKnown(existing, q);
     busy = true;
     hideBubbleQuiet();
     setMood('thinking');
@@ -354,6 +393,9 @@
       manualEntry(q);
       return;
     }
+    // model yazımı düzeltmiş olabilir (ör. verwisen → verweisen): düzeltilmiş hâli de kontrol et
+    const dup = findByDe(res.de);
+    if (dup) { busy = false; return showKnown(dup, q); }
     setMood('typing');
     think('defterime yazıyorum…', 1200);
     await sleep(900);
@@ -368,6 +410,16 @@
     celebrateGoal();
   }
 
+  function showKnown(w, q) {
+    logEvent('lookup_again', { q, de: fullDe(w), level: w.level });
+    const typo = q && deKey(q) !== deKey(w.de) && T.lowerTr(q.trim()) !== T.lowerTr(w.tr)
+      ? `<div class="b-hint">yazılışı: <b>${esc(fullDe(w))}</b></div>` : '';
+    setMood('happy', 1800);
+    showBubble(`${wordCard(w, 'bunu zaten biliyoruz kanka ✓', { ex: nextSentence(w, false, false) || w.ex })}${typo}
+      <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 15000 });
+    if (state.settings.voice === 'on') say(fullDe(w));
+  }
+
   function hideBubbleQuiet() {
     clearTimeout(bubbleTimer);
     bubble.hidden = true;
@@ -375,6 +427,8 @@
   }
 
   function addWord(res) {
+    const already = findByDe(res.de);
+    if (already) return already; // aynı kelime ikinci kez eklenmez
     const now = Date.now();
     const w = {
       id: now.toString(36) + Math.random().toString(36).slice(2, 6),
@@ -386,7 +440,7 @@
     };
     if (res.ex) markShown(res.ex.de);
     state.words.push(w);
-    day().added++;
+    day().added = todayAdded();
     save();
     render();
     return w;
@@ -394,14 +448,14 @@
 
   let celebratedDay = '';
   function celebrateGoal() {
-    const d = day();
-    if (d.added === state.settings.dailyGoal && celebratedDay !== todayKey()) {
+    const n = todayAdded();
+    if (n === state.settings.dailyGoal && celebratedDay !== todayKey()) {
       celebratedDay = todayKey();
       setTimeout(() => {
         if (bubbleKind) return;
         setMood('happy', 3000);
         showBubble(`<div class="b-tag">günlük hedef</div><div class="b-big">Tamamlandı!</div>
-          <div class="b-hint">Bugün ${d.added} yeni kelime kanka, helal olsun. Toll gemacht!</div>`, 'info', { autoClose: 5000 });
+          <div class="b-hint">Bugün ${n} yeni kelime kanka, helal olsun. Toll gemacht!</div>`, 'info', { autoClose: 5000 });
       }, 6000);
     }
   }
@@ -644,8 +698,9 @@
       lines.push(`„${w.de}“ kelimesini unutmadın değil mi?`);
       lines.push(`${w.tr}… ${fullDe(w)}… tamam not aldım`);
     }
-    if (d.added) lines.push(`bugün ${d.added} kelime yaptık, fena değiliz!`);
-    if (d.added < state.settings.dailyGoal && d.added > 0) lines.push(`hedefe ${state.settings.dailyGoal - d.added} kelime kaldı kanka`);
+    const nToday = todayAdded();
+    if (nToday) lines.push(`bugün ${nToday} kelime yaptık, fena değiliz!`);
+    if (nToday < state.settings.dailyGoal && nToday > 0) lines.push(`hedefe ${state.settings.dailyGoal - nToday} kelime kaldı kanka`);
     if (h >= 23 || h < 6) lines.push('geç oldu ama ben buradayım', 'uykum geldi ama devam…');
     if (h >= 6 && h < 11) lines.push('günaydın kanka, kahveler benden');
     if (aiQueue.length) lines.push('sana birkaç cümle hazırladım, birazdan…');
@@ -908,6 +963,10 @@
       if (!de || !tr) { f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); return; }
       if (art) de = de.charAt(0).toUpperCase() + de.slice(1);
       if (kind === 'manual') {
+        if (f.dataset.busy) return;
+        f.dataset.busy = '1';
+        const dupM = findByDe(de);
+        if (dupM) return showKnown(dupM, de);
         const pos = art ? 'n' : '';
         T.findExample(de, pos, art, navigator.onLine).then((ex) => {
           const w = addWord({ de, art, tr: T.lowerTr(tr), pos, ex, dir: 'tr2de', source: 'elle' });
@@ -917,6 +976,12 @@
       } else {
         const w = state.words.find((x) => x.id === f.dataset.id);
         if (!w) return hideBubble();
+        const clash = findByDe(de);
+        if (clash && clash.id !== w.id) {
+          f.insertAdjacentHTML('afterbegin', `<div class="b-hint">„${esc(fullDe(clash))}“ zaten defterde kanka</div>`);
+          f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake');
+          return;
+        }
         const exTxt = f.elements.ex.value.trim();
         w.de = de; w.tr = tr; w.art = art;
         if (art) w.pos = 'n';
@@ -931,6 +996,7 @@
 
   function deleteWord(id) {
     state.words = state.words.filter((w) => w.id !== id);
+    day().added = todayAdded();
     save(); render();
   }
 

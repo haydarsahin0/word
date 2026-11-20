@@ -74,7 +74,8 @@ button, input { font: inherit; color: inherit; }
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
   height: 18px;
 }
-.ticker-track { display: inline-block; animation: ticker 40s linear infinite; }
+.ticker-track { display: inline-block; }
+.ticker-track.scroll { animation: ticker 40s linear infinite; }
 .ticker-track span { margin-right: 28px; }
 .ticker-track b { font-weight: 500; color: var(--ink); }
 @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
