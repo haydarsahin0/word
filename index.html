@@ -35,14 +35,19 @@
 
     <div class="ticker" aria-hidden="true"><div class="ticker-track" id="ticker"></div></div>
 
-    <div class="count"><em id="total">0 / 500</em> <span>Wörter</span></div>
-    <div class="meter">
-      <span class="meter-label" id="totalPct">%0</span>
-      <div class="bar"><i id="totalBar"></i></div>
-    </div>
-    <div class="meter daily">
-      <span class="meter-label">heute <b id="today">0 / 10</b></span>
-      <div class="bar"><i id="dailyBar"></i></div>
+    <div class="top-area">
+      <div class="stats-col">
+      <div class="count"><em id="total">0 / 500</em> <span>Wörter</span></div>
+      <div class="meter">
+        <span class="meter-label" id="totalPct">%0</span>
+        <div class="bar"><i id="totalBar"></i></div>
+      </div>
+      <div class="meter daily">
+        <span class="meter-label">heute <b id="today">0 / 10</b></span>
+        <div class="bar"><i id="dailyBar"></i></div>
+      </div>
+      </div>
+      <section class="reader" id="reader" aria-label="Buch"></section>
     </div>
 
     <section class="stage" id="stage">
@@ -143,6 +148,7 @@
   <script src="js/dict.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/translate.js"></script>
+  <script src="js/reader.js"></script>
   <script src="js/scene.js"></script>
   <script src="js/app.js"></script>
 </body>

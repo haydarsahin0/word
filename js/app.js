@@ -328,7 +328,7 @@
   const sfx = (n) => window.SFX && SFX.play(n);
   const ACT_SOUNDS = {
     close: 'pop', edit: 'edit', delete: 'del', reveal: 'reveal', later: 'later',
-    addnew: 'coin', skip: 'whoosh', 'say-ex': 'bell',
+    addnew: 'coin', addbook: 'coin', skip: 'whoosh', 'say-ex': 'bell',
   };
   const ID_SOUNDS = {
     menuBtn: 'menuOpen', closeSheet: 'menuClose', askBtn: 'ask', exportBtn: 'export',
@@ -438,6 +438,7 @@
   }
   function hideBubble() {
     clearTimeout(bubbleTimer);
+    if (window.Reader) Reader.clearMark();
     bubble.hidden = true;
     bubbleKind = null;
     nextReviewAt = Date.now() + GAPS[state.settings.freq];
@@ -597,7 +598,7 @@
   function wordCard(w, tag, opts = {}) {
     const alts = (w.alts || []).length ? ` <span class="alt">· ${esc(w.alts.slice(0, 2).join(', '))}</span>` : '';
     const e = opts.ex || w.ex;
-    const ex = e ? `<div class="b-ex">„${highlight(e.de, w.de) || esc(e.de)}“${e.tr ? `<span class="tr">${esc(e.tr)}</span>` : ''}</div>` : '';
+    const ex = e ? `<div class="b-ex">„${highlight(e.de, opts.mark || w.de) || highlight(e.de, w.de) || esc(e.de)}“${e.tr ? `<span class="tr">${esc(e.tr)}</span>` : ''}</div>` : '';
     const plural = w.plural ? ` <span class="alt">· Plural: ${esc(w.plural)}</span>` : '';
     const meaning = w.meaning_tr ? `<div class="b-hint tr">${esc(w.meaning_tr)}</div>` : '';
     const simple = w.explain_de ? `<div class="b-simple"><span>einfach gesagt</span>${esc(w.explain_de)}</div>` : '';
@@ -1207,6 +1208,71 @@
       <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'feedback', { autoClose: 15000 });
   }
 
+  /* ---------- kitap: kelimeye dokun → anlamı, deftere ekle ---------- */
+  let readerQuietUntil = 0;
+  let pendingBook = null;
+  const bookCache = new Map();
+  async function lookupFromBook(word, sentence) {
+    readerQuietUntil = Date.now() + 30000;
+    if (busy) return;
+    hideBubbleQuiet();
+    hideThought();
+    busy = true;
+    setMood('thinking');
+    think(pick(['Moment, ich schaue nach…', 'hmm, was heißt das hier…', 'zeig mal…']), 6000);
+    const ck = word.toLowerCase() + '|' + sentence.slice(0, 80);
+    let res = bookCache.get(ck) || null;
+    if (!res) {
+      try { res = await T.lookup(word, sentence); } catch (e) { res = null; }
+      if (res && res.de) bookCache.set(ck, res);
+    }
+    busy = false;
+    hideThought();
+    if (!res || !res.de) {
+      setMood('sad', 2000);
+      showBubble(`<div class="b-tag">„${esc(word)}“</div><div>Ich komme gerade nicht ins Internet – versuch es gleich nochmal.</div>
+        <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 8000 });
+      return;
+    }
+    // Kitaptaki cümle örnek olsun (model kısaltmış olabilir)
+    const ex = res.ex && res.ex.de ? res.ex : { de: sentence, tr: '' };
+    logEvent('book_word', { q: word, de: (res.art ? res.art + ' ' : '') + res.de, tr: res.tr, sentence });
+    const known = findByDe(res.de);
+    setMood('talking', 1500);
+    if (known) {
+      pendingBook = null;
+      showBubble(`${wordCard(known, 'aus deinem Buch · kennen wir schon ✓', { ex, mark: word })}
+        <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 20000, focus: false });
+      if (known.ex !== ex) { addToPool(known, ex.de, ex.tr); save(); }
+    } else {
+      pendingBook = { ...res, ex };
+      showBubble(`${wordCard(pendingBook, 'aus deinem Buch', { ex, mark: word, say: true })}
+        <div class="b-actions"><button class="btn sm solid" data-act="addbook">ins Heft</button><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 30000, focus: false });
+    }
+    if (state.settings.voice === 'on') say((res.art ? res.art + ' ' : '') + res.de);
+  }
+  function addFromBook() {
+    if (!pendingBook) return hideBubble();
+    const w = addWord(pendingBook);
+    logEvent('book_word_added', { de: fullDe(w), tr: w.tr });
+    pendingBook = null;
+    setMood('happy', 1800);
+    showBubble(`${wordCard(w, 'steht im Heft ✓ ich frage dich oft')}<div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 8000, focus: false });
+    celebrateGoal();
+    readerQuietUntil = Date.now() + 20000;
+  }
+  if (window.Reader) {
+    Reader.init({
+      onWord: lookupFromBook,
+      onPage: () => { readerQuietUntil = Date.now() + 25000; if (bubbleKind && bubbleKind !== 'review') hideBubble(); },
+      onOpen: (b) => {
+        logEvent('book_opened', { title: b.title });
+        setMood('happy', 1500);
+        think(`„${b.title.slice(0, 40)}“ – schön! Tipp ein Wort an, ich erkläre es dir.`, 6000);
+      },
+    });
+  }
+
   /* ---------- olaylar ---------- */
   $('wordForm').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1235,6 +1301,7 @@
     else if (act === 'giveup') grade(false, '');
     else if (act === 'later') { if (current) logEvent('postponed', { de: fullDe(current.w), mode: current.mode }); postpone(); hideBubble(); }
     else if (act === 'addnew') addSuggested();
+    else if (act === 'addbook') addFromBook();
     else if (act === 'skip') {
       if (pendingNew) {
         logEvent('skipped_suggestion', { de: pendingNew.de, tr: pendingNew.tr });
@@ -1352,9 +1419,10 @@
       scene.setMood('waiting');
     }
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
-    if (!bubbleKind && !typingNow && now >= nextReviewAt) {
+    const reading = now < readerQuietUntil; // okurken kanka araya girmez
+    if (!bubbleKind && !typingNow && !reading && now >= nextReviewAt) {
       nextTalk();
-    } else if (!bubbleKind && !typingNow && thought.hidden && now >= nextThoughtAt) {
+    } else if (!bubbleKind && !typingNow && !reading && thought.hidden && now >= nextThoughtAt) {
       idleThought();
     }
     refillQueue();

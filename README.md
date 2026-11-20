@@ -41,6 +41,14 @@ soru türüyle gelir; az görülen ve düşük seviyeli kelimeler öne alınır.
 bildiğinde artar (2 dk → 10 dk → 1 saat → 5 saat → 1 gün → 3 gün …); aradaki tüm tekrarlar "Extra-Übung"dur.
 Aynı kelime üst üste gelmez (az kelimede 25 sn, çok kelimede 90 sn ara).
 
+### Kitap okuma
+
+İstatistiklerin yanındaki pencerede **Buch öffnen** ile bir EPUB ya da TXT dosyası açılır; kitap baştan, 5 satırlık
+sayfalarla gösterilir. ‹ › düğmeleri, kaydırma ya da klavye oklarıyla sayfa çevrilir; kaldığın yer hatırlanır.
+Bir kelimeye dokununca kanka onu **o cümledeki anlamıyla** açıklar (ör. *ging* → *gehen*), kitaptaki cümleyi örnek
+olarak gösterir; **ins Heft** ile deftere eklenir. Okurken kanka araya soru sokmaz. Kitap yalnızca bu cihazda
+(IndexedDB) saklanır; EPUB için ek kütüphane yok (küçük ZIP okuyucu + tarayıcının `DecompressionStream`'i).
+
 ### Akıllı tekrar
 
 SM-2 (Anki'nin yöntemi) benzeri: her kelimenin bir kolaylık puanı var. Cevap kalitesi doğruluk, cevap süresi

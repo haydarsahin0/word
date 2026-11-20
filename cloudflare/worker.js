@@ -274,7 +274,13 @@ async function handle(req) {
       case "lookup": {
         const q = String(body.q ?? "").trim().slice(0, 80);
         if (!q) return json({ error: "empty" }, 400, h);
-        const out = await askJson(withProfile(LOOKUP, body), `Input: "${q}"`, 0.3);
+        const ctx = String(body.context ?? "").trim().slice(0, 400);
+        const msg = `Input: "${q}"` + (ctx
+          ? `\nThe learner tapped this word while reading a book. Sentence from the book: "${ctx}"\n` +
+            `Give the meaning used in THIS sentence ("de" = dictionary form, e.g. ging -> gehen). ` +
+            `Use this book sentence (shortened if very long, keep the word as written) as the example and translate it.`
+          : "");
+        const out = await askJson(withProfile(LOOKUP, body), msg, 0.3);
         return json({ ...out, _usage: USAGE }, 200, h);
       }
 

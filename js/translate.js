@@ -202,11 +202,11 @@
    * Bir kelimeyi çevirir. Sonuç:
    * { de, art, tr, alts, pos, ex, dir, source }
    */
-  async function lookup(q) {
+  async function lookup(q, context) {
     q = q.trim().replace(/\s+/g, ' ');
     // 1) Meta Muse Ember (anlam, basit Almanca açıklama, örnek cümle)
     if (window.AI && window.AI.available()) {
-      try { return await window.AI.lookup(q); } catch (e) { /* yedeklere geç */ }
+      try { return await window.AI.lookup(q, context); } catch (e) { /* yedeklere geç */ }
     }
     const seed = seedLookup(q);
     if (seed) return { ...seed, alts: [], source: 'sözlük' };

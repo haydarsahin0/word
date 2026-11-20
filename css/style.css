@@ -129,6 +129,62 @@ button, input { font: inherit; color: inherit; }
 }
 .meter.done .bar i { background: repeating-linear-gradient(90deg, var(--ink) 0 3px, transparent 3px 5px); }
 
+/* ---------- kitap okuyucu ---------- */
+.top-area {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 4px;
+}
+.reader {
+  position: relative;
+  z-index: 3;
+  border: var(--stroke) solid var(--ink);
+  border-radius: 10px;
+  padding: 7px 10px 6px;
+  background: var(--bg-hi);
+  min-width: 0;
+}
+.reader.empty { padding: 0; border-style: dashed; background: transparent; }
+.r-open {
+  appearance: none; border: 0; background: none; width: 100%; min-height: 128px;
+  display: grid; place-content: center; gap: 4px; text-align: center; cursor: pointer;
+  font-family: var(--serif); color: var(--ink); padding: 12px;
+}
+.r-open b { font-size: 19px; font-weight: 500; font-style: italic; }
+.r-open span { font-size: 13px; color: var(--ink-2); }
+.r-head, .r-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.r-title { font-size: 12.5px; color: var(--ink-2); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-btn {
+  appearance: none; background: transparent; border: 1.3px solid var(--ink); border-radius: 5px;
+  font: 500 13px/1 var(--serif); color: var(--ink); padding: 3px 8px; cursor: pointer; flex: none;
+}
+.r-btn:disabled { opacity: 0.3; cursor: default; }
+.r-foot .r-btn { font-size: 17px; padding: 1px 10px 3px; }
+.r-prog { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.r-view { position: relative; overflow: hidden; margin: 5px 0 6px; cursor: text; }
+.r-flow {
+  font-size: 15.5px;
+  line-height: 1.45;
+  column-fill: auto;
+  transition: transform 0.28s cubic-bezier(.3, .7, .3, 1);
+  -webkit-hyphens: auto;
+  hyphens: auto;
+  text-align: left;
+}
+.r-flow p { margin: 0; text-indent: 1em; orphans: 1; widows: 1; }
+.r-flow p.h { text-indent: 0; font-style: italic; font-weight: 500; }
+.r-mark {
+  position: absolute; pointer-events: none; border-radius: 3px;
+  background: rgba(43, 36, 34, 0.14); box-shadow: inset 0 -2px 0 var(--ink);
+}
+@media (max-width: 520px) {
+  .top-area { grid-template-columns: 1fr; gap: 10px; }
+  .r-open { min-height: 92px; }
+}
+@media (prefers-reduced-motion: reduce) { .r-flow { transition: none; } }
+
 /* ---------- sahne ---------- */
 .stage {
   position: relative;

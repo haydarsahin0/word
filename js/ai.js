@@ -45,8 +45,8 @@
 
   const s = (v, n = 200) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 
-  async function lookup(q) {
-    const j = await call('lookup', { q });
+  async function lookup(q, context) {
+    const j = await call('lookup', context ? { q, context } : { q });
     const de = s(j.de, 60).replace(/^(der|die|das)\s+/i, '');
     const tr = s(j.tr, 60);
     if (!de || !tr) throw new Error('ai_empty');
