@@ -81,6 +81,22 @@
   }
   const fullDe = (w) => (w.art ? w.art + ' ' : '') + w.de;
   /** İsimle hitap: "Haydar" (ayarlardan değişir); boşsa hiç eklenmez */
+  /** Soru ipucunda kelimeyi ele verme: aynı kökten her sözcüğü ___ yap */
+  function maskWord(text, w) {
+    if (!text || !w || !w.de) return text || '';
+    const fold = (x) => x.toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss');
+    const forms = String(w.de).split(/\s+/).filter((x) => x.length >= 3).map((x) => {
+      let st = fold(x);
+      const cut = st.replace(/(ieren|eln|ern|en|n|e|s)$/, '');
+      if (cut.length >= 4) st = cut;
+      return st.length >= 4 ? st : fold(x);
+    });
+    if (w.plural) forms.push(fold(String(w.plural).replace(/^(der|die|das)\s+/i, '')));
+    return text.replace(/[\p{L}\p{M}]+/gu, (tok) => {
+      const f = fold(tok);
+      return forms.some((st) => st.length >= 3 && (f.includes(st) || (f.length >= 4 && st.startsWith(f) && f.length >= st.length - 1))) ? '___' : tok;
+    });
+  }
   const nameTag = (pre = '', post = '') => { const n = (state.settings.name || '').trim(); return n ? pre + n + post : ''; };
 
   /* ---------- aynı kelime tek kayıt ---------- */
@@ -336,6 +352,7 @@
   };
   function soundFor(b) {
     if (b.id === 'pauseBtn') return state.paused ? 'resume' : 'pause';
+    if (b.id === 'bookBtn') return readerOpen ? 'menuClose' : 'reveal';
     if (b.id === 'costBtn') return 'choice' + ['day', 'month', 'total'].indexOf(state.cost.view || 'day');
     if (ID_SOUNDS[b.id]) return ID_SOUNDS[b.id];
     if (b.matches('label.btn') && b.querySelector('#importFile')) return 'import';
@@ -795,13 +812,13 @@
       current.answer = exW;
       showBubble(`<div class="b-tag">${pick(['Was passt in die Lücke?', 'Ergänze den Satz!', 'Na, welches Wort fehlt?'])}</div>
         <div class="b-ex" style="border:0;margin:0;padding:0">„${highlight(ex.de, exW, 'gap')}“</div>
-        <div class="b-hint">Tipp: ${esc(w.explain_de || w.tr)}${w.explain_de ? `<span class="tr"> · ${esc(w.tr)}</span>` : ''}${ex.tr ? `<span class="tr"><i>${esc(ex.tr)}</i></span>` : ''}</div>
+        <div class="b-hint">Tipp: ${esc(w.explain_de ? maskWord(w.explain_de, w) : w.tr)}${w.explain_de ? `<span class="tr"> · ${esc(w.tr)}</span>` : ''}${ex.tr ? `<span class="tr"><i>${esc(ex.tr)}</i></span>` : ''}</div>
         <form class="b-form" data-form="answer"><input name="a" placeholder="welches Wort?" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
         <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
     } else if (mode === 'reverse') {
       current.answer = w.de;
       showBubble(`<div class="b-tag">${pick(['Wie heißt das auf Deutsch?', 'Welches Wort suche ich?', 'Na, wie sagt man das?'])}</div>
-        ${w.explain_de ? `<div class="b-simple"><span>einfach gesagt</span>${esc(w.explain_de)}</div><div class="b-hint tr">${esc(w.tr)}</div>` : `<div class="b-big">${esc(w.tr)}</div>`}
+        ${w.explain_de ? `<div class="b-simple"><span>einfach gesagt</span>${esc(maskWord(w.explain_de, w))}</div><div class="b-hint tr">${esc(w.tr)}</div>` : `<div class="b-big">${esc(w.tr)}</div>`}
         <form class="b-form" data-form="answer"><input name="a" placeholder="${w.pos === 'n' ? 'Artikel + Wort' : 'auf Deutsch'}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
         <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
     } else {
@@ -1148,7 +1165,7 @@
       const parts = s(it.de).split('___').map(esc);
       showBubble(`<div class="b-tag">${pick(['Was passt in die Lücke?', 'Ergänze den Satz!', 'Na, welches Wort fehlt?'])}</div>
         <div class="b-ex" style="border:0;margin:0;padding:0">„${parts.join('<span class="gap">&nbsp;</span>')}“</div>
-        <div class="b-hint">Tipp: ${esc(w.explain_de || w.tr)}${w.explain_de ? `<span class="tr"> · ${esc(w.tr)}</span>` : ''}${s(it.tr) ? `<span class="tr"><i>${esc(s(it.tr))}</i></span>` : ''}</div>
+        <div class="b-hint">Tipp: ${esc(w.explain_de ? maskWord(w.explain_de, w) : w.tr)}${w.explain_de ? `<span class="tr"> · ${esc(w.tr)}</span>` : ''}${s(it.tr) ? `<span class="tr"><i>${esc(s(it.tr))}</i></span>` : ''}</div>
         <form class="b-form" data-form="answer"><input name="a" placeholder="welches Wort?" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
         <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
       return true;
@@ -1288,18 +1305,37 @@
     celebrateGoal();
     readerQuietUntil = Date.now() + 20000;
   }
+  /* kitap penceresi: istediğinde aç/kapat (varsayılan kapalı, bu cihaza özel) */
+  let readerOpen = false;
+  try { readerOpen = localStorage.getItem('kelime-reader-open') === '1'; } catch (e) { /* yok */ }
+  function applyReader() {
+    $('reader').hidden = !readerOpen;
+    $('topArea').classList.toggle('with-reader', readerOpen);
+    $('bookBtn').classList.toggle('on', readerOpen);
+    $('bookBtn').setAttribute('aria-pressed', readerOpen ? 'true' : 'false');
+    if (readerOpen && window.Reader) Reader.relayout();
+    if (!readerOpen) { readerQuietUntil = 0; if (window.Reader) Reader.clearMark(); }
+    scheduleFit();
+  }
+  $('bookBtn').addEventListener('click', () => {
+    readerOpen = !readerOpen;
+    try { localStorage.setItem('kelime-reader-open', readerOpen ? '1' : '0'); } catch (e) { /* yok */ }
+    applyReader();
+  });
   if (window.Reader) {
     Reader.init({
       onLayout: scheduleFit,
       onWord: lookupFromBook,
       onPage: () => { readerQuietUntil = Date.now() + 25000; if (bubbleKind && bubbleKind !== 'review') hideBubble(); },
       onOpen: (b) => {
+        if (!readerOpen) { readerOpen = true; applyReader(); }
         logEvent('book_opened', { title: b.title });
         setMood('happy', 1500);
         think(`„${b.title.slice(0, 40)}“ – schön! Tipp ein Wort an, ich erkläre es dir.`, 6000);
       },
     });
   }
+  applyReader();
 
   /* ---------- olaylar ---------- */
   $('wordForm').addEventListener('submit', (e) => {

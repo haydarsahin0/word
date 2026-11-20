@@ -187,7 +187,7 @@ Return this JSON:
   "tr": the most common Turkish equivalent (lowercase unless proper noun),
   "alts": up to 2 other Turkish meanings (array, may be empty),
   "meaning_tr": ONE short Turkish sentence explaining what it means / when it is used (only shown as a hidden translation),
-  "explain_de": at most 2 VERY simple German sentences (A1–A2 words only) explaining the meaning, as a teacher would to a beginner,
+  "explain_de": at most 2 VERY simple German sentences (A1–A2 words only) explaining the meaning, as a teacher would to a beginner. It is also used as a QUIZ CLUE, so it must NOT contain the word itself or any form/word of the same family (e.g. for "entfalten" never write "entfaltet", "Entfaltung"); describe it with other words,
   "say_de": one short, casual German friend line about this word (a tiny joke or memory trick, e.g. "Das brauchst du jeden Tag, Haydar!"),
   "example": { "de": a natural everyday German sentence (6–12 words) that contains exactly the word form given in "de", "tr": its Turkish translation }
 }`;
@@ -202,7 +202,7 @@ Using the learner's words below, create exactly {N} short, varied teaching momen
 - {"type":"ask","id":"<word id>","q_de":"<a simple, friendly German question (A2) the learner can answer using the word>","q_tr":"<Turkish translation>"}
 - {"type":"tip","id":"<word id>","text_de":"<max 2 short, simple, casual German sentences: article, plural, conjugation, a false friend, or a memory trick>","de":"<one short German example>"}
 - {"type":"chat","text_de":"<one casual German friend line (max 12 words): what you are doing for them right now, a cheer, or a tiny joke about one of their words>"}
-- {"type":"new","de":"<a useful everyday A2 word NOT in the known list, without article>","art":"der|die|das or empty","pos":"n|v|a|d","tr":"<Turkish>","explain_de":"<max 2 very simple German sentences>","example":{"de":"<sentence containing exactly that form>","tr":"<Turkish>"}}
+- {"type":"new","de":"<a useful everyday A2 word NOT in the known list, without article>","art":"der|die|das or empty","pos":"n|v|a|d","tr":"<Turkish>","explain_de":"<max 2 very simple German sentences that do NOT contain the word or any form of it>","example":{"de":"<sentence containing exactly that form>","tr":"<Turkish>"}}
 Each word may have an "avoid" list: sentences/questions the learner has ALREADY seen. Never reuse, copy or closely
 paraphrase them — every sentence must be brand new. Keep it fresh and varied:
 - situation/theme for this batch: {THEME} (but stay natural for each word),

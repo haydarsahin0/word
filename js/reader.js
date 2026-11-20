@@ -179,6 +179,7 @@
     const h = Math.ceil(lh * LINES) + 1;
     view.style.height = h + 'px';
     const w = view.clientWidth;
+    if (!w) return; // pencere kapalıyken ölçülemez; açılınca yeniden yerleşir
     const gap = 24;
     flow.style.height = h + 'px';
     flow.style.width = w + 'px';
@@ -334,6 +335,7 @@
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => book && layoutChapter(pos.ratio));
     },
     clearMark() { const m = $('rMark'); if (m) m.hidden = true; },
+    relayout() { if (book) layoutChapter(pos.ratio); },
     hasBook: () => !!book,
   };
 })();

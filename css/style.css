@@ -150,6 +150,10 @@ button, input { font: inherit; color: inherit; }
   min-width: 0;
 }
 .reader.empty { padding: 0; border-style: dashed; background: transparent; }
+.reader[hidden] { display: none; }
+.top-area:not(.with-reader) { grid-template-columns: 1fr; }
+.btn.icon.on { background: var(--ink); }
+.btn.icon.on svg { fill: var(--bg); }
 .r-open {
   appearance: none; border: 0; background: none; width: 100%; min-height: 128px;
   display: grid; place-content: center; gap: 4px; text-align: center; cursor: pointer;

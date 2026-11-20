@@ -35,7 +35,7 @@
 
     <div class="ticker" aria-hidden="true"><div class="ticker-track" id="ticker"></div></div>
 
-    <div class="top-area">
+    <div class="top-area" id="topArea">
       <div class="stats-col">
       <div class="count"><em id="total">0 / 500</em> <span>Wörter</span></div>
       <div class="meter">
@@ -47,7 +47,7 @@
         <div class="bar"><i id="dailyBar"></i></div>
       </div>
       </div>
-      <section class="reader" id="reader" aria-label="Buch"></section>
+      <section class="reader" id="reader" aria-label="Buch" hidden></section>
     </div>
 
     <section class="stage" id="stage">
@@ -63,6 +63,9 @@
       </button>
       <button class="btn icon" id="askBtn" aria-label="Bana şimdi sor">
         <svg viewBox="0 0 8 10" width="9" height="12" shape-rendering="crispEdges"><rect x="2" y="0" width="4" height="1"/><rect x="1" y="1" width="2" height="1"/><rect x="5" y="1" width="2" height="3"/><rect x="4" y="4" width="2" height="1"/><rect x="3" y="5" width="2" height="2"/><rect x="3" y="8" width="2" height="2"/></svg>
+      </button>
+      <button class="btn icon" id="bookBtn" aria-label="Kitabı aç/kapat" aria-pressed="false">
+        <svg viewBox="0 0 12 10" width="14" height="12" shape-rendering="crispEdges"><rect x="0" y="1" width="1" height="8"/><rect x="1" y="1" width="4" height="1"/><rect x="1" y="9" width="4" height="1"/><rect x="5" y="2" width="2" height="8"/><rect x="7" y="1" width="4" height="1"/><rect x="7" y="9" width="4" height="1"/><rect x="11" y="1" width="1" height="8"/><rect x="2" y="4" width="2" height="1"/><rect x="8" y="4" width="2" height="1"/><rect x="2" y="6" width="2" height="1"/><rect x="8" y="6" width="2" height="1"/></svg>
       </button>
       <form class="word-form" id="wordForm" autocomplete="off">
         <input id="wordInput" type="text" placeholder="Wort eingeben… (tr / de)" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" maxlength="60">
