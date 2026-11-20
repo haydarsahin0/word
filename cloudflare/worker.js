@@ -126,6 +126,39 @@ const PERSONA =
   "'valla'. Never use emojis. Keep everything short. Turkish must be natural, correct, colloquial Turkish. " +
   "German must be correct, natural, everyday German. Always answer with ONLY a JSON object, no markdown, no commentary.";
 
+/** Öğrenci profili (tarayıcıda tutulur, her istekle gelir) */
+function profileText(body) {
+  const p = typeof body?.profile === "string" ? body.profile.trim().slice(0, 1500) : "";
+  if (!p) return "";
+  return `\n\nWHAT YOU KNOW ABOUT YOUR FRIEND (inferred from their activity, keep using it):\n${p}\n` +
+    "Use this: build sentences around their life, interests and goals; match their level; quietly revisit their weak points; " +
+    "and mirror their way of talking (tone, casualness, slang, sentence length, how they write) so you sound like them.";
+}
+function withProfile(system, body) {
+  return system + profileText(body);
+}
+
+const PROFILE = `${PERSONA}
+
+You quietly study your friend so you can teach them better. You get your previous notes about them and a log of their
+recent activity in this app: words they looked up (exactly as they typed them), quiz results, their own German answers,
+suggested words they accepted or skipped, things they postponed.
+Infer carefully from evidence: who they are, what their daily life looks like, what topics they care about, what they want
+to learn, their real level, their recurring mistakes, and their personal style of writing/talking. Keep what still holds
+from the old notes, update with new evidence, never invent facts without a hint in the data.
+Return:
+{
+  "summary_tr": "<2–3 short Turkish sentences: who they are as a learner>",
+  "level": "A1" | "A2" | "B1" | "B2",
+  "interests": ["<up to 6 short Turkish topics>"],
+  "life": ["<up to 5 short Turkish facts/guesses about their daily life, only with evidence>"],
+  "goals": ["<up to 5: what kinds of words/topics they want to learn>"],
+  "weak_points": ["<up to 5 short Turkish items, e.g. 'artikeller', 'fiil çekimi', 'isimleri büyük yazmak'>"],
+  "style": "<1–2 English sentences describing how they write and talk (tone, casing, slang, length) so you can mirror it>",
+  "next_focus": "<one English sentence: what to emphasize in the next lessons>",
+  "observation_tr": "<one casual Turkish friend line (max 18 words) telling them something new you noticed about them, or empty>"
+}`;
+
 const LOOKUP = `${PERSONA}
 
 The learner typed a word or short phrase (maybe with a typo). It is either Turkish or German — detect which.
@@ -201,7 +234,7 @@ async function handle(req) {
       case "lookup": {
         const q = String(body.q ?? "").trim().slice(0, 80);
         if (!q) return json({ error: "empty" }, 400, h);
-        const out = await askJson(LOOKUP, `Input: "${q}"`, 0.3);
+        const out = await askJson(withProfile(LOOKUP, body), `Input: "${q}"`, 0.3);
         return json(out, 200, h);
       }
 
@@ -219,10 +252,13 @@ async function handle(req) {
         const newHint = body.wantNew
           ? 'Include exactly one item of type "new".'
           : 'Do not use type "new" unless the word list is empty.';
-        const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
+        const interests = (Array.isArray(body.interests) ? body.interests : []).map((x) => String(x).slice(0, 40)).slice(0, 6);
+        const theme = interests.length && Math.random() < 0.6
+          ? `${interests[Math.floor(Math.random() * interests.length)]} (one of their interests)`
+          : THEMES[Math.floor(Math.random() * THEMES.length)];
         const sys = TALK.replace("{N}", String(n)).replace("{NEW_HINT}", newHint).replace("{THEME}", theme);
         const user = `Learner's words (focus):\n${JSON.stringify(words)}\n\nAll known words (do not suggest these as new):\n${known.join(", ")}`;
-        const out = await askJson(sys, user, 0.9);
+        const out = await askJson(withProfile(sys, body), user, 0.9);
         return json({ items: Array.isArray(out?.items) ? out.items : [] }, 200, h);
       }
 
@@ -232,7 +268,15 @@ async function handle(req) {
           target_word: String(body.word ?? "").slice(0, 40),
           learner_answer: String(body.answer ?? "").slice(0, 300),
         });
-        const out = await askJson(CHECK, user, 0.3);
+        const out = await askJson(withProfile(CHECK, body), user, 0.3);
+        return json(out, 200, h);
+      }
+
+      case "profile": {
+        const old = body.old && typeof body.old === "object" ? JSON.stringify(body.old).slice(0, 2500) : "{}";
+        const events = (Array.isArray(body.events) ? body.events : []).slice(-80).map((e) => JSON.stringify(e).slice(0, 300));
+        const user = `Previous notes:\n${old}\n\nRecent activity (oldest first):\n${events.join("\n")}`;
+        const out = await askJson(PROFILE, user, 0.4);
         return json(out, 200, h);
       }
 

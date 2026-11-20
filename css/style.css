@@ -257,6 +257,14 @@ body.paused #pauseBtn .i-play { display: block; }
 body.paused #pauseBtn .i-pause { display: none; }
 
 /* ---------- ayarlar ---------- */
+.profile { border-top: 1.5px solid var(--ink); padding-top: 9px; display: grid; gap: 6px; }
+.profile p { margin: 0; font-size: 15.5px; line-height: 1.35; }
+.profile .muted, .muted { color: var(--ink-2); font-size: 13.5px; font-style: italic; }
+.pbtns { display: flex; gap: 4px; }
+.prow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 14px; }
+.prow > span:first-child { color: var(--ink-2); font-size: 12.5px; margin-right: 2px; width: 100%; }
+.chip { border: 1.3px solid var(--ink); border-radius: 999px; padding: 1px 8px; font-size: 13.5px; }
+.chip.solid { background: var(--ink); color: var(--bg); font-style: normal; }
 .sheet-wrap {
   position: fixed;
   inset: 0;

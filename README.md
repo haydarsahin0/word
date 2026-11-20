@@ -29,7 +29,15 @@ Model şunları yapar:
 - gün boyu hep yeni örnek cümleler, boşluk doldurma, Almanca sorular (cevabını değerlendirir), ipuçları ve yeni kelime önerileri,
 - hepsini samimi bir "kanka" diliyle; daha önce gösterilen cümleler tekrar edilmez.
 
+### Seni tanıması
+
+Uygulama yaptıklarını küçük bir günlükte tutar: sorduğun kelimeler (yazdığın hâliyle), quiz sonuçları,
+Almanca cevapların, kabul ettiğin/geçtiğin öneriler. Birkaç yeni olayda bir model bu günlükten bir profil çıkarır:
+seviyen, ilgi alanların, hayatından ipuçları, öğrenmek istediklerin, zayıf noktaların ve yazış tarzın.
+Sonraki her çeviri, cümle, soru ve düzeltme bu profile göre yapılır; kanka fark ettiği şeyleri düşünce balonunda söyler.
+Profil ≡ menüsünde "Kanka seni nasıl tanıyor" bölümünde görünür; **unut** ile silinir. Günlük ve profil yalnızca
+tarayıcında saklanır, istekle birlikte modele gönderilir.
+
 Worker'a ulaşılamazsa uygulama Google Translate + yerleşik sözlük + yerel tekrar ile çalışmaya devam eder.
 
 Worker'ı güncellemek: Cloudflare panelinde `kelime-ai` → **Edit code** → `cloudflare/worker.js` içeriğini yapıştır → **Deploy**.
-(`supabase/functions/kelime-ai` aynı kodun Supabase sürümüdür.)

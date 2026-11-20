@@ -20,6 +20,10 @@
         s.settings = Object.assign(defaults().settings, s.settings);
         s.days = s.days || {};
         s.recent = Array.isArray(s.recent) ? s.recent : [];
+        s.log = Array.isArray(s.log) ? s.log : [];
+        s.profile = s.profile && typeof s.profile === 'object' ? s.profile : null;
+        s.profileAt = s.profileAt || 0;
+        s.logAtProfile = s.logAtProfile || 0;
         s.words.forEach((w) => {
           if (!Array.isArray(w.pool)) w.pool = w.ex ? [{ de: w.ex.de, tr: w.ex.tr || '', n: 0, last: 0 }] : [];
           if (!Array.isArray(w.asked)) w.asked = [];
@@ -30,7 +34,7 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on' }, paused: false };
   }
   function save() {
     try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* depolama yok */ }
@@ -170,6 +174,63 @@
     return m ? m[2] : null;
   }
 
+  /* ---------- kanka seni tanıyor: olay günlüğü + profil ---------- */
+  let logSeq = 0;
+  function logEvent(type, data) {
+    const e = { t: new Date().toISOString().slice(0, 16), type, ...data };
+    Object.keys(e).forEach((k) => { if (typeof e[k] === 'string') e[k] = e[k].slice(0, 160); if (e[k] === '' || e[k] == null) delete e[k]; });
+    state.log.push(e);
+    state.logCount = (state.logCount || 0) + 1;
+    if (state.log.length > 200) state.log.splice(0, state.log.length - 200);
+    save();
+  }
+  function profileText() {
+    const p = state.profile;
+    if (!p) return '';
+    const parts = [];
+    if (p.summary_tr) parts.push('Summary: ' + p.summary_tr);
+    if (p.level) parts.push('Level: ' + p.level);
+    if (p.interests && p.interests.length) parts.push('Interests: ' + p.interests.join(', '));
+    if (p.life && p.life.length) parts.push('Life: ' + p.life.join('; '));
+    if (p.goals && p.goals.length) parts.push('Wants to learn: ' + p.goals.join(', '));
+    if (p.weak_points && p.weak_points.length) parts.push('Weak points: ' + p.weak_points.join(', '));
+    if (p.style) parts.push('Their style: ' + p.style);
+    if (p.next_focus) parts.push('Next focus: ' + p.next_focus);
+    const recentQ = state.log.filter((e) => e.type === 'lookup').slice(-12).map((e) => e.q).filter(Boolean);
+    if (recentQ.length) parts.push('Recently asked about: ' + recentQ.join(', '));
+    return parts.join('\n');
+  }
+  if (window.AI) AI.setProfileProvider(() => ({ text: profileText(), interests: (state.profile && state.profile.interests) || [] }));
+
+  let profiling = false;
+  async function maybeUpdateProfile(force) {
+    if (profiling || !window.AI || !AI.available() || state.paused) return;
+    const fresh = (state.logCount || 0) - (state.logAtProfile || 0);
+    const age = Date.now() - (state.profileAt || 0);
+    const due = force || fresh >= 8 || (fresh >= 3 && age > 20 * MIN) || (!state.profile && fresh >= 3);
+    if (!due || age < 2 * MIN) return;
+    profiling = true;
+    try {
+      const r = await AI.profile(state.profile || {}, state.log.slice(-80));
+      const arr = (v, n) => (Array.isArray(v) ? v.map((x) => String(x).slice(0, 60)).filter(Boolean).slice(0, n) : []);
+      const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+      const prevObs = state.profile && state.profile.observation_tr;
+      state.profile = {
+        summary_tr: str(r.summary_tr, 400), level: str(r.level, 3),
+        interests: arr(r.interests, 6), life: arr(r.life, 5), goals: arr(r.goals, 5), weak_points: arr(r.weak_points, 5),
+        style: str(r.style, 300), next_focus: str(r.next_focus, 200), observation_tr: str(r.observation_tr, 160),
+      };
+      state.profileAt = Date.now();
+      state.logAtProfile = state.logCount || 0;
+      save();
+      if (state.profile.observation_tr && state.profile.observation_tr !== prevObs) {
+        setTimeout(() => { if (bubble.hidden) { setMood('thinking', 6000); think(state.profile.observation_tr, 8000); } }, 1500);
+      }
+      if (!$('sheet').hidden) renderSheet();
+    } catch (e) { /* sonra tekrar dener */ }
+    profiling = false;
+  }
+
   /* ---------- çeşitlilik: gösterilen cümleleri hatırla, tekrar etme ---------- */
   const sentKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   function seen(text) { return !!text && state.recent.includes(sentKey(text)); }
@@ -235,6 +296,7 @@
     if (!q || busy) return;
     const existing = findExisting(q);
     if (existing) {
+      logEvent('lookup_again', { q, de: fullDe(existing), level: existing.level });
       setMood('happy', 1800);
       showBubble(`${wordCard(existing, 'bunu zaten biliyoruz kanka ✓', { ex: nextSentence(existing, false, false) || existing.ex })}
         <div class="b-actions"><button class="btn sm" data-act="close">tamam</button></div>`, 'info', { autoClose: 15000 });
@@ -260,6 +322,7 @@
     think('defterime yazıyorum…', 1200);
     await sleep(900);
     const w = addWord(res);
+    logEvent('lookup', { q, de: fullDe(w), tr: w.tr, pos: w.pos });
     busy = false;
     setMood('talking', 1500);
     showBubble(`${wordCard(w, 'yeni kelime · defterime yazdım', { say: true })}
@@ -426,6 +489,7 @@
       if (!m) note = note || `artikeliyle: <b>${esc(fullDe(w))}</b>`;
       else if (m[1] !== w.art) note = `artikel <b>${esc(w.art)}</b> olacak: ${esc(fullDe(w))}`;
     }
+    current.input = input;
     grade(ok, note);
   }
 
@@ -445,6 +509,7 @@
   function grade(ok, note) {
     const w = current.w;
     const shownEx = current.ex || null;
+    logEvent('quiz', { mode: current.mode, de: fullDe(w), tr: w.tr, ok, answer: current.input || (ok ? '(bildim)' : '(bilemedim)'), expected: current.answer });
     const now = Date.now();
     w.reviews++;
     w.last = now;
@@ -719,6 +784,7 @@
 
   function addSuggested() {
     if (!pendingNew) return hideBubble();
+    logEvent('accepted_suggestion', { de: (pendingNew.art ? pendingNew.art + ' ' : '') + pendingNew.de, tr: pendingNew.tr });
     const w = addWord(pendingNew);
     pendingNew = null;
     setMood('happy', 1800);
@@ -740,6 +806,7 @@
     busy = false;
     const used = new RegExp(w.de.slice(0, Math.max(3, w.de.length - 2)), 'i').test(answer);
     const ok = res ? !!res.ok : used;
+    logEvent('answer', { question: q, answer, ok, fix: res && res.fix_de });
     record(w, ok);
     setMood(ok ? 'happy' : 'talking', 2200);
     const fix = res && typeof res.fix_de === 'string' && res.fix_de.trim() && normalize(res.fix_de) !== normalize(answer) ? res.fix_de.trim() : '';
@@ -775,9 +842,9 @@
     else if (act === 'knew') grade(true, '');
     else if (act === 'forgot') grade(false, '');
     else if (act === 'giveup') grade(false, '');
-    else if (act === 'later') { postpone(); hideBubble(); }
+    else if (act === 'later') { if (current) logEvent('postponed', { de: fullDe(current.w), mode: current.mode }); postpone(); hideBubble(); }
     else if (act === 'addnew') addSuggested();
-    else if (act === 'skip') { pendingNew = null; hideBubble(); }
+    else if (act === 'skip') { if (pendingNew) logEvent('skipped_suggestion', { de: pendingNew.de, tr: pendingNew.tr }); pendingNew = null; hideBubble(); }
     else if (act === 'say-ex') say(b.dataset.text);
   });
 
@@ -878,6 +945,7 @@
       idleThought();
     }
     refillQueue();
+    if (now % 15000 < 1000) maybeUpdateProfile();
     updateTitle();
   }, 1000);
 
@@ -906,6 +974,7 @@
     const mastered = state.words.filter((w) => w.level >= MASTERED).length;
     const reviews = Object.values(state.days).reduce((s, d) => s + (d.reviewed || 0), 0);
     const correct = Object.values(state.days).reduce((s, d) => s + (d.correct || 0), 0);
+    renderProfile();
     $('stats').innerHTML = `
       <div><b>${state.words.length}</b>kelime</div>
       <div><b>${mastered}</b>öğrenildi</div>
@@ -913,6 +982,29 @@
       <div><b>%${reviews ? Math.round((correct / reviews) * 100) : 0}</b>başarı</div>`;
     renderList();
   }
+  function renderProfile() {
+    const p = state.profile;
+    const el = $('profileBox');
+    if (!p) {
+      el.innerHTML = `<p class="muted">Henüz seni tanımıyorum kanka. Birkaç kelime sor, birkaç soruya cevap ver; arka planda notlar alıp sana göre ders yapmaya başlarım.</p>`;
+      return;
+    }
+    const chips = (arr) => (arr || []).map((x) => `<span class="chip">${esc(x)}</span>`).join('');
+    el.innerHTML = `
+      <p>${esc(p.summary_tr || '')}${p.level ? ` <span class="chip solid">${esc(p.level)}</span>` : ''}</p>
+      ${p.interests && p.interests.length ? `<div class="prow"><span>ilgi alanların</span>${chips(p.interests)}</div>` : ''}
+      ${p.goals && p.goals.length ? `<div class="prow"><span>öğrenmek istediklerin</span>${chips(p.goals)}</div>` : ''}
+      ${p.weak_points && p.weak_points.length ? `<div class="prow"><span>üzerinde çalıştığımız</span>${chips(p.weak_points)}</div>` : ''}
+      ${p.life && p.life.length ? `<div class="prow"><span>hayatından</span>${chips(p.life)}</div>` : ''}
+      <p class="muted">son güncelleme: ${humanizePast(Date.now() - state.profileAt)}</p>`;
+  }
+  function humanizePast(ms) {
+    if (ms < 2 * MIN) return 'az önce';
+    if (ms < HOUR) return Math.round(ms / MIN) + ' dk önce';
+    if (ms < DAY) return Math.round(ms / HOUR) + ' saat önce';
+    return Math.round(ms / DAY) + ' gün önce';
+  }
+
   function renderList() {
     const q = T.key($('search').value || '');
     const list = state.words.filter((w) => !q || T.key(w.de).includes(q) || T.lowerTr(w.tr).includes(q)).slice().reverse();
@@ -969,6 +1061,12 @@
     } catch (err) { alert('Dosya okunamadı.'); }
     e.target.value = '';
   });
+  $('profileRefresh').addEventListener('click', () => { state.profileAt = 0; maybeUpdateProfile(true); $('profileBox').insertAdjacentHTML('beforeend', '<p class="muted">düşünüyorum…</p>'); });
+  $('profileForget').addEventListener('click', () => {
+    if (!confirm('Kanka seninle ilgili tüm notlarını silsin mi?')) return;
+    state.profile = null; state.log = []; state.logCount = 0; state.logAtProfile = 0; state.profileAt = 0;
+    save(); renderSheet();
+  });
   $('resetBtn').addEventListener('click', () => {
     if (!confirm('Tüm kelimeler ve ilerleme silinsin mi?')) return;
     state = defaults();
@@ -993,5 +1091,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true) };
 })();

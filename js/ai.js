@@ -4,6 +4,7 @@
   const ENDPOINT = 'https://kelime-ai.haydar-sahin.workers.dev';
   let downUntil = 0;
   let lastError = '';
+  let profileProvider = () => ({ text: '', interests: [] });
 
   async function call(action, payload, ms = 25000) {
     if (Date.now() < downUntil) throw new Error('ai_down');
@@ -13,7 +14,7 @@
       const r = await fetch(ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, ...payload }),
+        body: JSON.stringify({ action, profile: profileProvider().text, ...payload }),
         signal: ctl.signal,
       });
       const j = await r.json().catch(() => ({}));
@@ -60,7 +61,7 @@
   }
 
   async function talk(words, known, wantNew, n = 3) {
-    const j = await call('talk', { words, known, wantNew, n }, 35000);
+    const j = await call('talk', { words, known, wantNew, n, interests: profileProvider().interests || [] }, 35000);
     return Array.isArray(j.items) ? j.items.filter((it) => it && typeof it.type === 'string') : [];
   }
 
@@ -68,8 +69,13 @@
     return call('check', { q_de, word, answer });
   }
 
+  async function profile(old, events) {
+    return call('profile', { old, events }, 45000);
+  }
+
   window.AI = {
-    lookup, talk, check,
+    lookup, talk, check, profile,
+    setProfileProvider: (fn) => { profileProvider = fn; },
     available: () => Date.now() >= downUntil,
     lastError: () => lastError,
     endpoint: ENDPOINT,
