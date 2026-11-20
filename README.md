@@ -19,19 +19,17 @@ bir yerde yayınlayıp Safari'de **Paylaş → Ana Ekrana Ekle** demek yeterli (
 
 ## Yapay zekâ (Meta Muse Ember)
 
-Karakterin beyni `supabase/functions/kelime-ai` içindeki Supabase Edge Function'dır. Fonksiyon
-Meta Model API'deki `muse-ember-1.0` modelini çağırır; API anahtarını **`musebaba`** adlı Supabase
-secret'ından okur (anahtar tarayıcıya hiç gitmez).
+Karakterin beyni bir Cloudflare Worker'dır: `cloudflare/worker.js`
+(adres: `https://kelime-ai.haydar-sahin.workers.dev`). Worker, Meta Model API'deki `muse-ember-1.0`
+modelini çağırır; API anahtarını Worker'ın **`musebaba`** adlı secret'ından okur (anahtar tarayıcıya hiç gitmez).
+Yalnızca GitHub Pages adresinden (ve yerelden) gelen isteklere cevap verir, dakikalık istek sınırı vardır.
 
 Model şunları yapar:
 - yazdığın kelimenin çevirisi, artikeli ve çoğulu, kısa Türkçe anlamı, **en fazla 2 cümlelik basit Almanca açıklaması** ve örnek cümlesi,
-- gün boyu yeni örnek cümleler, boşluk doldurma soruları, Almanca sorular (cevabını değerlendirir), küçük ipuçları ve sana yeni kelime önerileri,
-- hepsini samimi bir "kanka" diliyle.
+- gün boyu hep yeni örnek cümleler, boşluk doldurma, Almanca sorular (cevabını değerlendirir), ipuçları ve yeni kelime önerileri,
+- hepsini samimi bir "kanka" diliyle; daha önce gösterilen cümleler tekrar edilmez.
 
-Fonksiyona ulaşılamazsa uygulama Google Translate + yerleşik sözlük + yerel tekrar ile çalışmaya devam eder.
+Worker'a ulaşılamazsa uygulama Google Translate + yerleşik sözlük + yerel tekrar ile çalışmaya devam eder.
 
-Yükleme (Supabase CLI ile):
-
-```sh
-supabase functions deploy kelime-ai --project-ref jckoovsocynnxbrsalld --no-verify-jwt
-```
+Worker'ı güncellemek: Cloudflare panelinde `kelime-ai` → **Edit code** → `cloudflare/worker.js` içeriğini yapıştır → **Deploy**.
+(`supabase/functions/kelime-ai` aynı kodun Supabase sürümüdür.)

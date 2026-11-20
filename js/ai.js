@@ -1,7 +1,7 @@
-/* Meta Muse Ember istemcisi — Supabase Edge Function üzerinden konuşur.
-   API anahtarı tarayıcıda DEĞİL, Supabase secret'ında ("musebaba") durur. */
+/* Meta Muse Ember istemcisi — Cloudflare Worker (kelime-ai) üzerinden konuşur.
+   API anahtarı tarayıcıda DEĞİL, Worker secret'ında ("musebaba") durur. */
 (function () {
-  const ENDPOINT = 'https://jckoovsocynnxbrsalld.supabase.co/functions/v1/kelime-ai';
+  const ENDPOINT = 'https://kelime-ai.haydar-sahin.workers.dev';
   let downUntil = 0;
   let lastError = '';
 
