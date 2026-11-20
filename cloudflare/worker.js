@@ -249,6 +249,25 @@ async function handle(req) {
 
   try {
     switch (body?.action) {
+      // ---------- senkron: cihazlar arası defter (Durable Object "SyncRoom") ----------
+      // Anahtar, senkron kodunun SHA-256 özetidir; kodu bilmeyen veriye ulaşamaz.
+      // Her senkron kodu kendi odasına (Durable Object) sahiptir: okumalar her zaman günceldir.
+      // Her cihaz yalnızca kendi kaydına yazar, diğerlerininkini okuyup birleştirir.
+      case "sync_get":
+      case "sync_put": {
+        const key = String(body.key || "");
+        const dev = String(body.device || "");
+        if (!/^[a-f0-9]{64}$/.test(key)) return json({ error: "bad_key" }, 400, h);
+        if (body.action === "sync_put" && !/^[a-z0-9]{4,16}$/.test(dev)) return json({ error: "bad_device" }, 400, h);
+        if (!ENV.SYNCROOM) return json({ error: "no_store" }, 500, h);
+        const payload = body.action === "sync_put" ? { op: "put", device: dev, doc: body.doc ?? null } : { op: "get" };
+        const str = JSON.stringify(payload);
+        if (str.length > 1_900_000) return json({ error: "too_big" }, 413, h);
+        const stub = ENV.SYNCROOM.get(ENV.SYNCROOM.idFromName(key));
+        const r = await stub.fetch("https://sync-room/", { method: "POST", body: str });
+        return json(await r.json(), r.status, h);
+      }
+
       case "ping":
         return json({ ok: true, hasKey: !!apiKey(), model: modelName() }, 200, h);
 
@@ -319,3 +338,19 @@ export default {
     return handle(req);
   },
 };
+
+/** Bir senkron kodunun odası: cihaz başına bir kayıt tutar (güçlü tutarlılık). */
+export class SyncRoom {
+  constructor(ctx) {
+    this.ctx = ctx;
+  }
+  async fetch(req) {
+    const { op, device, doc } = await req.json();
+    if (op === "put") {
+      await this.ctx.storage.put("dev:" + device, doc);
+      return Response.json({ ok: true, at: Date.now() });
+    }
+    const all = await this.ctx.storage.list({ prefix: "dev:" });
+    return Response.json({ docs: [...all.values()].filter(Boolean) });
+  }
+}

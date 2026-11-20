@@ -303,6 +303,13 @@ body.paused #pauseBtn .i-pause { display: none; }
 .profile p { margin: 0; font-size: 15.5px; line-height: 1.35; }
 .profile .muted, .muted { color: var(--ink-2); font-size: 13.5px; font-style: italic; }
 .pbtns { display: flex; gap: 4px; }
+.sync-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.sync-row input {
+  flex: 1; min-width: 0; background: transparent; border: var(--stroke) solid var(--ink); border-radius: 6px;
+  padding: 5px 8px; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; outline: none;
+}
+.sync-row input::placeholder { text-transform: none; letter-spacing: 0; font-style: italic; }
+.sync-code { font-size: 22px; font-style: italic; font-weight: 500; letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
 .prow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 14px; }
 .prow > span:first-child { color: var(--ink-2); font-size: 12.5px; margin-right: 2px; width: 100%; }
 .chip { border: 1.3px solid var(--ink); border-radius: 999px; padding: 1px 8px; font-size: 13.5px; }
@@ -366,6 +373,7 @@ body.paused #pauseBtn .i-pause { display: none; }
 .word-list li .de small { font-style: normal; font-weight: 400; color: var(--ink-2); font-size: 13px; }
 .word-list li .tr { display: block; font-size: 14px; color: var(--ink-2); }
 .word-list .lv { display: flex; gap: 2px; }
+.word-list .lv .hard { font-size: 12px; margin-right: 3px; line-height: 6px; }
 .word-list .seen { font-size: 12.5px; color: var(--ink-2); font-style: italic; }
 .word-list .lv i { width: 6px; height: 6px; border: 1.2px solid var(--ink); border-radius: 1px; }
 .word-list .lv i.f { background: var(--ink); }

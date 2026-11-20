@@ -79,6 +79,36 @@
     return call('profile', { old, events }, 45000);
   }
 
+  /* ---------- senkron (aynı Worker, KV deposu) ---------- */
+  async function syncCall(action, payload) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...payload }),
+        signal: ctl.signal,
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || 'http_' + r.status);
+      return j;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  window.Sync = {
+    /** Kod → depolama anahtarı (SHA-256). Kodun kendisi sunucuya hiç gitmez. */
+    async keyFor(code) {
+      const data = new TextEncoder().encode('kelime-sync-v1:' + String(code).toUpperCase().replace(/[^A-Z0-9]/g, ''));
+      const buf = await crypto.subtle.digest('SHA-256', data);
+      return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    },
+    /** Diğer cihazların kayıtları (her cihaz kendi kaydına yazar) */
+    get: (key) => syncCall('sync_get', { key }).then((j) => (Array.isArray(j.docs) ? j.docs : [])),
+    put: (key, device, doc) => syncCall('sync_put', { key, device, doc }),
+  };
+
   window.AI = {
     lookup, talk, check, profile,
     setProfileProvider: (fn) => { profileProvider = fn; },

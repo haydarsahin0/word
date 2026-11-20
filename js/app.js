@@ -5,6 +5,18 @@
   // Aralıklı tekrar seviyeleri (Leitner benzeri)
   const INTERVALS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR, DAY, 3 * DAY, 7 * DAY, 16 * DAY, 35 * DAY, 90 * DAY, 180 * DAY];
   const MASTERED = 5; // 3 gün aralığına ulaşan kelime "öğrenildi" sayılır
+  // Akıllı tekrar (SM-2 benzeri): kolaylık puanı, öğrenme adımları, mezuniyet aralığı
+  const LEARN_STEPS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR];
+  const GRAD_IVL = DAY;
+  const EASE0 = 2.3, EASE_MIN = 1.3, EASE_MAX = 3.0;
+  const clampEase = (e) => Math.max(EASE_MIN, Math.min(EASE_MAX, e));
+  function levelFromIvl(ivl) {
+    let l = -1;
+    for (const x of INTERVALS) if (x <= ivl * 1.05) l++;
+    return Math.max(0, l);
+  }
+  /** Zorluk: düşük kolaylık + yakın zamandaki hatalar (pratik seçiminde öne alınır) */
+  const difficulty = (w) => (EASE_MAX - (w.ease || EASE0)) + (w.recentErr || 0) * 0.7;
   // aynı kelime bu süre içinde tekrar gösterilmez (az kelimede kısa, çok kelimede uzun)
   const cooldownMs = () => { const n = state.words.length; return n <= 3 ? 25 * 1000 : n <= 10 ? 45 * 1000 : 90 * 1000; };
   const IDLE_MS = 8 * MIN; // bu kadar dokunulmazsa kanka uyur, model çağrılmaz
@@ -28,9 +40,18 @@
         s.profileAt = s.profileAt || 0;
         s.logAtProfile = s.logAtProfile || 0;
         s.cost = s.cost && typeof s.cost === 'object' ? s.cost : { days: {}, view: 'day' };
+        s.deleted = s.deleted || {};
+        s.sync = s.sync || { code: '', lastAt: 0, err: '' };
+        s.settingsAt = s.settingsAt || 0;
+        if (!s.deviceId) s.deviceId = Math.random().toString(36).slice(2, 10);
         s.words.forEach((w) => {
           if (!Array.isArray(w.pool)) w.pool = w.ex ? [{ de: w.ex.de, tr: w.ex.tr || '', n: 0, last: 0 }] : [];
           if (!Array.isArray(w.asked)) w.asked = [];
+          if (w.ease == null) {
+            const INT = [2, 10, 60, 300, 1440, 4320, 10080, 23040, 50400, 129600, 259200].map((m) => m * 60 * 1000);
+            w.ease = 2.3; w.reps = w.level || 0; w.recentErr = 0;
+            w.ivl = INT[Math.min(w.level || 0, INT.length - 1)];
+          }
         });
         return s;
       }
@@ -38,9 +59,11 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar' }, paused: false };
   }
-  function save() {
+  let syncDirty = false;
+  function save(markDirty = true) {
+    if (markDirty) syncDirty = true;
     try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { /* depolama yok */ }
   }
 
@@ -81,6 +104,9 @@
       if (!first) { byKey.set(k, w); keep.push(w); continue; }
       merged++;
       first.level = Math.max(first.level || 0, w.level || 0);
+      first.ivl = Math.max(first.ivl || 0, w.ivl || 0);
+      first.reps = Math.max(first.reps || 0, w.reps || 0);
+      first.ease = Math.min(first.ease || 2.3, w.ease || 2.3);
       first.reviews = (first.reviews || 0) + (w.reviews || 0);
       first.correct = (first.correct || 0) + (w.correct || 0);
       first.lapses = (first.lapses || 0) + (w.lapses || 0);
@@ -98,6 +124,136 @@
   if (mergeDuplicates()) save();
   day().added = todayAdded();
 
+  /* ---------- senkron: iPad ⇄ telefon ---------- */
+  const SYNC_ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function newSyncCode() {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    const c = [...b].map((x) => SYNC_ALPHA[x % SYNC_ALPHA.length]).join('');
+    return c.match(/.{4}/g).join('-');
+  }
+  const cleanCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const prettyCode = (c) => (cleanCode(c).match(/.{1,4}/g) || []).join('-');
+
+  /** İki cihazdaki aynı kelimeyi birleştir: metin → en son düzenlenen, tekrar bilgisi → en son çalışılan */
+  function mergeWord(a, b) {
+    const ta = a.edited || a.created || 0, tb = b.edited || b.created || 0;
+    const m = { ...(tb > ta ? b : a) };
+    const rv = (b.last || 0) > (a.last || 0) ? b : a;
+    ['level', 'ivl', 'ease', 'reps', 'due', 'lapses', 'correct', 'reviews', 'last', 'lastMode', 'recentErr'].forEach((f) => { if (rv[f] !== undefined) m[f] = rv[f]; });
+    m.id = (a.created || 0) <= (b.created || 0) ? a.id : b.id;
+    m.created = Math.min(a.created || Date.now(), b.created || Date.now());
+    const pool = new Map();
+    [...(a.pool || []), ...(b.pool || [])].forEach((x) => {
+      const o = pool.get(x.de);
+      pool.set(x.de, o ? { ...o, n: Math.max(o.n || 0, x.n || 0), last: Math.max(o.last || 0, x.last || 0) } : { ...x });
+    });
+    m.pool = [...pool.values()].slice(-15);
+    m.asked = [...new Set([...(a.asked || []), ...(b.asked || [])])].slice(-10);
+    if (a.seenDay === b.seenDay) m.seenToday = Math.max(a.seenToday || 0, b.seenToday || 0);
+    else { const sd = (a.seenDay || '') > (b.seenDay || '') ? a : b; m.seenDay = sd.seenDay; m.seenToday = sd.seenToday; }
+    m.seenAt = Math.max(a.seenAt || 0, b.seenAt || 0);
+    return m;
+  }
+
+  function mergeRemote(r) {
+    if (!r || r.v !== 1) return;
+    const del = { ...(r.deleted || {}) };
+    Object.entries(state.deleted || {}).forEach(([k, t]) => { del[k] = Math.max(del[k] || 0, t); });
+    state.deleted = del;
+    const map = new Map(state.words.map((w) => [deKey(w.de), w]));
+    (r.words || []).forEach((rw) => {
+      const k = deKey(rw.de);
+      const lw = map.get(k);
+      if (lw) Object.assign(lw, mergeWord(lw, rw)); // aynı nesne kalsın (açık soru bozulmasın)
+      else map.set(k, rw);
+    });
+    state.words = [...map.values()]
+      .filter((w) => !((del[deKey(w.de)] || 0) >= (w.created || 0)))
+      .sort((a, b) => (a.created || 0) - (b.created || 0));
+    Object.entries(r.days || {}).forEach(([k, d]) => {
+      const l = state.days[k] || (state.days[k] = { added: 0, reviewed: 0, correct: 0 });
+      ['added', 'reviewed', 'correct'].forEach((f) => { l[f] = Math.max(l[f] || 0, d[f] || 0); });
+    });
+    if ((r.settingsAt || 0) > (state.settingsAt || 0) && r.settings) {
+      state.settings = Object.assign({}, state.settings, r.settings);
+      state.settingsAt = r.settingsAt;
+    }
+    if ((r.profileAt || 0) > (state.profileAt || 0) && r.profile) {
+      state.profile = r.profile;
+      state.profileAt = r.profileAt;
+    }
+    const seenLog = new Set();
+    state.log = [...(state.log || []), ...(r.log || [])]
+      .filter((e) => { const k = JSON.stringify(e); if (seenLog.has(k)) return false; seenLog.add(k); return true; })
+      .sort((a, b) => ((a.t || '') < (b.t || '') ? -1 : 1))
+      .slice(-200);
+    state.recent = [...new Set([...(r.recent || []), ...state.recent])].slice(-500);
+    state.skipped = [...new Set([...(r.skipped || []), ...(state.skipped || [])])].slice(-100);
+    if (r.deviceId && r.deviceId !== state.deviceId) {
+      state.costOthers = state.costOthers || {};
+      state.costOthers[r.deviceId] = r.costDays || {};
+    }
+  }
+
+  function exportDoc() {
+    return {
+      v: 1,
+      deviceId: state.deviceId,
+      updatedAt: Date.now(),
+      words: state.words,
+      deleted: state.deleted,
+      days: state.days,
+      settings: state.settings,
+      settingsAt: state.settingsAt,
+      profile: state.profile,
+      profileAt: state.profileAt,
+      log: state.log,
+      recent: state.recent,
+      skipped: state.skipped || [],
+      costDays: state.cost.days,
+    };
+  }
+
+  let syncing = false;
+  let lastSyncTry = 0;
+  async function syncNow() {
+    if (!window.Sync || !state.sync.code || syncing) return false;
+    syncing = true;
+    lastSyncTry = Date.now();
+    let ok = false;
+    try {
+      const key = await Sync.keyFor(state.sync.code);
+      const docs = await Sync.get(key);
+      docs.filter((d) => d && d.deviceId !== state.deviceId).forEach(mergeRemote);
+      await Sync.put(key, state.deviceId, exportDoc());
+      state.sync.lastAt = Date.now();
+      state.sync.err = '';
+      syncDirty = false;
+      ok = true;
+      day().added = todayAdded();
+    } catch (e) {
+      state.sync.err = e && e.message === 'Failed to fetch' ? 'bağlantı yok' : String((e && e.message) || e);
+    }
+    syncing = false;
+    save(false);
+    render();
+    if (!$('sheet').hidden) renderSync();
+    return ok;
+  }
+  // bağlantıyla gelindiyse (…/?sync=KOD) kodu al
+  (function () {
+    try {
+      const u = new URL(location.href);
+      const c = u.searchParams.get('sync');
+      if (c && cleanCode(c).length >= 12) {
+        state.sync.code = prettyCode(c);
+        u.searchParams.delete('sync');
+        history.replaceState(null, '', u.pathname + (u.search ? u.search : '') + u.hash);
+        save(false);
+      }
+    } catch (e) { /* yok say */ }
+  })();
+
   /* ---------- sadece sen bakarken çalış ---------- */
   let lastInteraction = Date.now();
   let dormant = false;
@@ -106,6 +262,8 @@
     document.addEventListener(ev, () => { lastInteraction = Date.now(); if (dormant) wakeUp(); }, { passive: true, capture: true }));
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { lastInteraction = Date.now(); if (dormant) wakeUp(); }
+    // ayrılırken ve dönünce eşitle (diğer cihazdaki değişiklikler gelsin)
+    if (state.sync.code && typeof syncNow === 'function') syncNow();
   });
   if (window.AI && AI.setActiveCheck) AI.setActiveCheck(isActive);
 
@@ -136,8 +294,14 @@
   }
   function costFor(view) {
     const k = todayKey();
-    const days = Object.entries(state.cost.days);
-    if (view === 'day') return (state.cost.days[k] || {}).usd || 0;
+    // bu cihaz + senkronla gelen diğer cihazlar
+    const all = {};
+    [state.cost.days, ...Object.values(state.costOthers || {})].forEach((dd) => Object.entries(dd || {}).forEach(([d, v]) => {
+      all[d] = all[d] || { usd: 0 };
+      all[d].usd += v.usd || 0;
+    }));
+    if (view === 'day') return (all[k] || {}).usd || 0;
+    const days = Object.entries(all);
     if (view === 'month') return days.filter(([d]) => d.slice(0, 7) === k.slice(0, 7)).reduce((a, [, v]) => a + v.usd, 0);
     return days.reduce((a, [, v]) => a + v.usd, 0);
   }
@@ -184,6 +348,10 @@
     if (b.closest('#voiceSeg')) return b.dataset.v === 'on' ? 'on' : 'off';
     if (b.closest('#sfxSeg')) return b.dataset.v === 'on' ? null : 'off';
     if (b.classList.contains('del')) return 'crumple';
+    if (b.id === 'syncCreate' || b.id === 'syncJoin') return 'coin';
+    if (b.id === 'syncNowBtn') return 'refresh';
+    if (b.id === 'syncCopy') return 'bell';
+    if (b.id === 'syncOff') return 'off';
     return 'tap';
   }
   document.addEventListener('click', (e) => {
@@ -509,6 +677,7 @@
       plural: res.plural || '', meaning_tr: res.meaning_tr || '', explain_de: res.explain_de || '', say_de: res.say_de || '',
       ex: res.ex || null, dir: res.dir || 'tr2de', source: res.source || '',
       level: 0, due: now + INTERVALS[0], created: now, reviews: 0, correct: 0, lapses: 0, last: 0,
+      ease: EASE0, ivl: LEARN_STEPS[0], reps: 0, recentErr: 0,
       pool: res.ex ? [{ de: res.ex.de, tr: res.ex.tr || '', n: 1, last: now }] : [], asked: [],
     };
     if (res.ex) markShown(res.ex.de);
@@ -592,7 +761,7 @@
     if (mode === 'cloze' && !exW) mode = 'reverse';
     w.lastMode = mode;
     touch(w);
-    current = { w, mode, ex, revealed: false };
+    current = { w, mode, ex, revealed: false, started: Date.now() };
     setMood('talking', 1200);
     if (mode === 'cloze') {
       current.answer = exW;
@@ -658,50 +827,81 @@
     grade(ok, note);
   }
 
-  /** Sonucu işle. Seviye sadece tekrar zamanı gelmiş kelimede artar; erken bilmek "ekstra pratik"tir. */
-  function applyResult(w, ok) {
+  /** Cevap kalitesi 0–5: doğruluk, yazım/artikel notu ve cevap süresi */
+  function quality(ok, note, ms, mode) {
+    if (!ok) return 1;
+    if (note) return 3;
+    if (mode === 'recall') return 4; // kendi değerlendirmen
+    if (ms < 7000) return 5;
+    if (ms < 18000) return 4;
+    return 3;
+  }
+
+  /**
+   * Akıllı tekrar. Aralık sadece tekrar zamanı gelmiş kelimede ilerler; arada yapılan
+   * pratik aralığı ilerletmez ama hata yapılırsa tekrarı öne çeker ve kelimeyi "zor" yapar.
+   */
+  function review(w, q) {
     const now = Date.now();
     const wasDue = w.due <= now + 30 * 1000;
     let advanced = false;
+    w.ease = w.ease || EASE0;
+    w.ivl = w.ivl || LEARN_STEPS[0];
     w.reviews++;
     w.last = now;
-    if (ok) {
-      w.correct++;
-      if (wasDue) {
-        w.level = Math.min(INTERVALS.length - 1, w.level + 1);
-        w.due = now + INTERVALS[w.level] * (0.9 + Math.random() * 0.2);
+    if (q >= 3) w.correct++;
+    else { w.lapses++; w.recentErr = Math.min(5, (w.recentErr || 0) + 1); }
+    if (wasDue) {
+      if (q < 3) {
+        w.reps = 0;
+        w.ease = clampEase(w.ease - 0.2);
+        w.ivl = LEARN_STEPS[0];
+      } else {
+        w.reps = (w.reps || 0) + 1;
+        w.ease = clampEase(w.ease + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)));
+        if (w.reps < LEARN_STEPS.length) w.ivl = LEARN_STEPS[w.reps];
+        else if (w.ivl < GRAD_IVL) w.ivl = GRAD_IVL;
+        else w.ivl = w.ivl * w.ease * (q === 3 ? 0.8 : q === 5 ? 1.15 : 1);
+        if (q >= 4) w.recentErr = Math.max(0, (w.recentErr || 0) - 1);
         advanced = true;
       }
-    } else {
-      w.lapses++;
-      w.level = w.level >= 4 ? 2 : 0;
-      w.due = now + INTERVALS[w.level];
+      w.due = now + w.ivl * (0.92 + Math.random() * 0.16);
+    } else if (q < 3) {
+      w.ease = clampEase(w.ease - 0.15);
+      if (w.ivl > HOUR) w.ivl = Math.max(HOUR, w.ivl / 2);
+      w.due = Math.min(w.due, now + 10 * MIN);
+    } else if (q === 5) {
+      w.ease = clampEase(w.ease + 0.02);
     }
+    w.level = levelFromIvl(w.ivl);
     const d = day();
     d.reviewed++;
-    if (ok) d.correct++;
+    if (q >= 3) d.correct++;
     save();
     render();
     return advanced;
   }
-  function record(w, ok) { return applyResult(w, ok); }
+  function applyResult(w, ok) { return review(w, ok ? 4 : 1); }
+  function record(w, q) { return review(w, typeof q === 'number' ? q : (q ? 4 : 1)); }
 
   function grade(ok, note) {
     const w = current.w;
     const shownEx = current.ex || null;
     logEvent('quiz', { mode: current.mode, de: fullDe(w), tr: w.tr, ok, answer: current.input || (ok ? '(bildim)' : '(bilemedim)'), expected: current.answer });
     const now = Date.now();
-    const advanced = applyResult(w, ok);
+    const q = quality(ok, note, now - (current.started || now), current.mode);
+    const advanced = review(w, q);
     const nextTxt = humanize(w.due - now);
     sfx(ok ? 'ok' : 'no');
     if (ok) {
       setMood('happy', 2200);
-      const praise = pick(['Super!', 'Sehr gut!', 'Genau!', `Stark${nameTag(', ')}!`, 'Perfekt!', `Klasse${nameTag(', ')}!`]);
+      const praise = q === 5 ? pick(['Blitzschnell!', `Wow${nameTag(', ')}, sofort gewusst!`, 'Ohne Nachdenken – stark!']) : pick(['Super!', 'Sehr gut!', 'Genau!', `Stark${nameTag(', ')}!`, 'Perfekt!', `Klasse${nameTag(', ')}!`]);
       showBubble(`<div class="b-tag">${praise}</div>
         <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
         <div class="b-mean">${esc(w.tr)}</div>
         ${note ? `<div class="b-hint">${note}</div>` : ''}
-        <div class="b-hint">${advanced ? `nächstes Level · nächste Wiederholung ${nextTxt}` : `Extra-Übung ✓ · Wiederholung ${nextTxt}`}</div>`, 'feedback', { autoClose: note ? 5000 : 3200 });
+        ${q === 3 && !note ? '<div class="b-hint">richtig – aber noch etwas langsam, wir üben das öfter</div>' : ''}
+        <div class="b-hint">${advanced ? `nächste Wiederholung ${nextTxt}` : `Extra-Übung ✓ · Wiederholung ${nextTxt}`}</div>`, 'feedback', { autoClose: note ? 5000 : 3200 });
     } else {
       setMood('sad', 2500);
       showBubble(`${wordCard(w, 'kein Problem – so ist es richtig, ich frage dich wieder', { ex: shownEx })}
@@ -799,7 +999,7 @@
   let lastFocus = new Set();
   function focusWords() {
     const now = Date.now();
-    const score = (w) => (w.due <= now ? 0 : 10) + w.level + Math.random() * 3 + (lastFocus.has(w.id) ? 6 : 0);
+    const score = (w) => (w.due <= now ? 0 : 10) + w.level - difficulty(w) * 2 + Math.random() * 3 + (lastFocus.has(w.id) ? 6 : 0);
     const list = [...state.words].map((w) => [score(w), w]).sort((a, b) => a[0] - b[0]).slice(0, 6).map((x) => x[1]);
     lastFocus = new Set(list.map((w) => w.id));
     return list.map((w) => ({
@@ -871,7 +1071,9 @@
     const rested = state.words.filter((w) => !cooling(w));
     if (rested.length && Math.random() < 0.85) {
       // en az görülen ve en düşük seviyeli kelimeler daha sık gelir
-      const w = pick([...rested].sort((a, b) => (seenTodayOf(a) + a.level * 3) - (seenTodayOf(b) + b.level * 3) || a.seenAt - b.seenAt).slice(0, 4));
+      // az görülen, düşük seviyeli ve zor kelimeler daha sık gelir
+      const pscore = (x) => seenTodayOf(x) + x.level * 3 - difficulty(x) * 4;
+      const w = pick([...rested].sort((a, b) => pscore(a) - pscore(b) || a.seenAt - b.seenAt).slice(0, 4));
       if (freshSentences(w) && Math.random() < 0.4) {
         const ex = nextSentence(w, true);
         return showExample(w, ex.de, ex.tr, '', true);
@@ -913,7 +1115,7 @@
       save();
       w.lastMode = 'cloze';
       touch(w);
-      current = { w, mode: 'cloze', answer: s(it.answer), ex: { de: full, tr: s(it.tr) } };
+      current = { w, mode: 'cloze', answer: s(it.answer), ex: { de: full, tr: s(it.tr) }, started: Date.now() };
       setMood('talking', 1200);
       const parts = s(it.de).split('___').map(esc);
       showBubble(`<div class="b-tag">${pick(['Was passt in die Lücke?', 'Ergänze den Satz!', 'Na, welches Wort fehlt?'])}</div>
@@ -995,7 +1197,7 @@
     const ok = res ? !!res.ok : used;
     sfx(ok ? 'ok' : 'no');
     logEvent('answer', { question: q, answer, ok, fix: res && res.fix_de });
-    record(w, ok);
+    record(w, ok ? 4 : used ? 3 : 2);
     setMood(ok ? 'happy' : 'talking', 2200);
     const fix = res && typeof res.fix_de === 'string' && res.fix_de.trim() && normalize(res.fix_de) !== normalize(answer) ? res.fix_de.trim() : '';
     const fb = res && (res.feedback_de || res.feedback) ? (res.feedback_de || res.feedback) : (ok ? `Gut gemacht${nameTag(', ')}!` : `Versuch, „${fullDe(w)}“ zu benutzen.`);
@@ -1086,7 +1288,7 @@
           return;
         }
         const exTxt = f.elements.ex.value.trim();
-        w.de = de; w.tr = tr; w.art = art;
+        w.de = de; w.tr = tr; w.art = art; w.edited = Date.now();
         if (art) w.pos = 'n';
         if (exTxt && (!w.ex || exTxt !== w.ex.de)) w.ex = { de: exTxt, tr: '', src: 'elle' };
         if (!exTxt) w.ex = null;
@@ -1098,6 +1300,8 @@
   });
 
   function deleteWord(id) {
+    const gone = state.words.find((w) => w.id === id);
+    if (gone) state.deleted[deKey(gone.de)] = Date.now();
     state.words = state.words.filter((w) => w.id !== id);
     day().added = todayAdded();
     save(); render();
@@ -1155,6 +1359,8 @@
     }
     refillQueue();
     if (now % 15000 < 1000) maybeUpdateProfile();
+    // senkron: değişiklik varsa 45 sn'de bir, yoksa 4 dk'da bir (diğer cihazdan gelenler için)
+    if (state.sync.code && !syncing && (syncDirty ? now - lastSyncTry > 45000 : now - lastSyncTry > 4 * MIN)) syncNow();
     updateTitle();
   }, 1000);
 
@@ -1196,10 +1402,11 @@
     $('nameInput').value = state.settings.name || '';
     document.querySelectorAll('#sfxSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === (state.settings.sfx || 'on')));
     document.querySelectorAll('#voiceSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === state.settings.voice));
-    const mastered = state.words.filter((w) => w.level >= MASTERED).length;
+    const mastered = state.words.filter((w) => (w.ivl || 0) >= 3 * DAY * 0.95).length;
     const reviews = Object.values(state.days).reduce((s, d) => s + (d.reviewed || 0), 0);
     const correct = Object.values(state.days).reduce((s, d) => s + (d.correct || 0), 0);
     renderProfile();
+    renderSync();
     $('stats').innerHTML = `
       <div><b>${state.words.length}</b>kelime</div>
       <div><b>${mastered}</b>öğrenildi</div>
@@ -1207,6 +1414,26 @@
       <div><b>%${reviews ? Math.round((correct / reviews) * 100) : 0}</b>başarı</div>`;
     renderList();
   }
+  function renderSync() {
+    const el = $('syncBox');
+    if (!el) return;
+    const sy = state.sync;
+    if (!sy.code) {
+      el.innerHTML = `<p class="muted">Kelimelerin, ilerlemen ve kankanın notları iPad ile telefon arasında eşitlensin.</p>
+        <div class="sync-row"><button class="btn sm solid" id="syncCreate">senkronu aç</button></div>
+        <div class="sync-row"><input id="syncCodeIn" placeholder="diğer cihazdaki kod" autocapitalize="characters" autocomplete="off" spellcheck="false"><button class="btn sm" id="syncJoin">bağlan</button></div>`;
+      return;
+    }
+    const status = syncing ? 'eşitleniyor…'
+      : sy.err ? `eşitlenemedi (${esc(sy.err)})`
+      : sy.lastAt ? `son eşitleme: ${humanizePast(Date.now() - sy.lastAt)} ✓` : 'henüz eşitlenmedi';
+    const others = Object.keys(state.costOthers || {}).length;
+    el.innerHTML = `<div class="sync-code">${esc(prettyCode(sy.code))}</div>
+      <p class="muted">${status}${others ? ` · ${others + 1} cihaz bağlı` : ''}</p>
+      <p class="muted">Diğer cihazda: Ayarlar → Senkron → bu kodu gir. Ya da bağlantıyı kopyalayıp diğer cihazda aç.</p>
+      <div class="sync-row"><button class="btn sm solid" id="syncNowBtn">şimdi eşitle</button><button class="btn sm" id="syncCopy">bağlantıyı kopyala</button><button class="btn sm danger" id="syncOff">kapat</button></div>`;
+  }
+
   function renderProfile() {
     const p = state.profile;
     const el = $('profileBox');
@@ -1236,10 +1463,37 @@
     $('wordList').innerHTML = list.length ? list.map((w) => {
       const lv = Math.min(5, Math.ceil(w.level / 2));
       return `<li><div><span class="de">${w.art ? `<small>${esc(w.art)}</small> ` : ''}${esc(w.de)}</span><span class="tr">${esc(w.tr)}</span></div>
-        <span class="seen">${seenTodayOf(w) ? seenTodayOf(w) + '×' : ''}</span><span class="lv" title="seviye ${w.level}">${[0, 1, 2, 3, 4].map((i) => `<i class="${i < lv ? 'f' : ''}"></i>`).join('')}</span>
+        <span class="seen">${seenTodayOf(w) ? seenTodayOf(w) + '×' : ''}</span><span class="lv" title="seviye ${w.level} · sonraki tekrar ${humanize(Math.max(0, w.due - Date.now()))}${difficulty(w) > 1.4 ? ' · zor kelime' : ''}">${difficulty(w) > 1.4 ? '<b class="hard">!</b>' : ''}${[0, 1, 2, 3, 4].map((i) => `<i class="${i < lv ? 'f' : ''}"></i>`).join('')}</span>
         <button class="del" data-id="${w.id}" aria-label="sil">×</button></li>`;
     }).join('') : '<li class="empty">Henüz kelime yok.</li>';
   }
+  $('syncBox').addEventListener('click', async (e) => {
+    const id = e.target.id;
+    if (id === 'syncCreate') {
+      state.sync.code = newSyncCode();
+      save(false); renderSync();
+      await syncNow();
+    } else if (id === 'syncJoin') {
+      const c = cleanCode($('syncCodeIn').value);
+      if (c.length < 12) { $('syncCodeIn').classList.remove('shake'); void $('syncCodeIn').offsetWidth; $('syncCodeIn').classList.add('shake'); return; }
+      state.sync.code = prettyCode(c);
+      save(false); renderSync();
+      await syncNow();
+      renderSheet();
+    } else if (id === 'syncNowBtn') {
+      e.target.textContent = 'eşitleniyor…';
+      await syncNow();
+      renderSheet();
+    } else if (id === 'syncCopy') {
+      const link = location.origin + location.pathname + '?sync=' + cleanCode(state.sync.code);
+      try { await navigator.clipboard.writeText(link); e.target.textContent = 'kopyalandı ✓'; } catch (err) { prompt('Bu bağlantıyı diğer cihazda aç:', link); }
+    } else if (id === 'syncOff') {
+      if (!confirm('Bu cihazda senkron kapatılsın mı? (Veriler silinmez.)')) return;
+      state.sync = { code: '', lastAt: 0, err: '' };
+      state.costOthers = {};
+      save(false); renderSheet();
+    }
+  });
   $('search').addEventListener('input', renderList);
   $('wordList').addEventListener('click', (e) => {
     const b = e.target.closest('.del');
@@ -1251,27 +1505,28 @@
       if (!b) return;
       const k = s.dataset.key, step = +s.dataset.step;
       const v = Math.max(+s.dataset.min, Math.min(+s.dataset.max, state.settings[k] + step * +b.dataset.d));
-      state.settings[k] = v;
+      state.settings[k] = v; state.settingsAt = Date.now();
       save(); render(); renderSheet();
     });
   });
   $('freqSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
-    state.settings.freq = b.dataset.v; save(); renderSheet();
+    state.settings.freq = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
     nextReviewAt = Math.min(nextReviewAt, Date.now() + GAPS[state.settings.freq]);
   });
   $('nameInput').addEventListener('change', (e) => {
     state.settings.name = e.target.value.trim().slice(0, 30);
+    state.settingsAt = Date.now();
     save();
   });
   $('sfxSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
-    state.settings.sfx = b.dataset.v; save(); renderSheet();
+    state.settings.sfx = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
     if (b.dataset.v === 'on') sfx('on');
   });
   $('voiceSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
-    state.settings.voice = b.dataset.v; save(); renderSheet();
+    state.settings.voice = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
   });
   $('exportBtn').addEventListener('click', () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -1303,9 +1558,11 @@
   });
   $('resetBtn').addEventListener('click', () => {
     if (!confirm('Tüm kelimeler ve ilerleme silinsin mi?')) return;
-    const keepCost = state.cost;
+    const keepCost = state.cost, keepSync = state.sync, keepDev = state.deviceId;
+    const gone = Object.fromEntries(state.words.map((w) => [deKey(w.de), Date.now()]));
     state = defaults();
-    state.cost = keepCost;
+    state.cost = keepCost; state.sync = keepSync; state.deviceId = keepDev;
+    state.deleted = gone; // senkronda diğer cihazdan geri gelmesin
     save(); render(); renderSheet();
   });
 
@@ -1323,9 +1580,10 @@
         <div class="b-actions"><button class="btn sm" data-act="close">alles klar</button></div>`, 'info', { autoClose: 20000, focus: false });
     }, 1200);
   }
+  if (state.sync.code) setTimeout(syncNow, 1500);
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive() };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow() };
 })();

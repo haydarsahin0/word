@@ -41,6 +41,20 @@ soru türüyle gelir; az görülen ve düşük seviyeli kelimeler öne alınır.
 bildiğinde artar (2 dk → 10 dk → 1 saat → 5 saat → 1 gün → 3 gün …); aradaki tüm tekrarlar "Extra-Übung"dur.
 Aynı kelime üst üste gelmez (az kelimede 25 sn, çok kelimede 90 sn ara).
 
+### Akıllı tekrar
+
+SM-2 (Anki'nin yöntemi) benzeri: her kelimenin bir kolaylık puanı var. Cevap kalitesi doğruluk, cevap süresi
+ve yazım/artikel hatalarından hesaplanır. Öğrenme adımları 2 dk → 10 dk → 1 sa → 5 sa → 1 gün; sonrasında aralık
+kolaylık puanıyla büyür (hızlı bilinen kelimeler haftalar sonra, zorlar 1–2 günde bir). Aradaki pratiklerde yapılan
+hata tekrarı öne çeker ve kelimeyi "zor" yapar; zor kelimeler gün içinde daha sık gelir (listede `!` ile işaretli).
+
+### Senkron (iPad ⇄ telefon)
+
+≡ → Senkron → **senkronu aç** bir kod üretir; diğer cihazda bu kod girilir ya da "bağlantıyı kopyala" ile gelen
+bağlantı açılır. Kelimeler, ilerleme, ayarlar, profil ve maliyet cihazlar arasında eşitlenir (değişiklik varsa
+45 sn'de bir, sekme değişince ve açılışta). Veriler Worker'daki bir Durable Object'te, kodun SHA-256 özetiyle
+saklanır; her cihaz kendi kaydına yazar, diğerlerini birleştirir. Silinen kelimeler diğer cihazdan geri gelmez.
+
 ### Sadece Almanca
 
 Karakter yalnızca basit Almanca konuşur. Türkçe sadece kelimenin karşılığında görünür; cümle çevirileri
