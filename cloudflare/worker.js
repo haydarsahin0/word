@@ -3,6 +3,7 @@
 
 const BASE = "https://api.meta.ai/v1";
 let ENV = {};
+let USAGE = null; // bu istekte harcanan token'lar (maliyet takibi için)
 const modelName = () => ENV.MUSE_MODEL || "muse-ember-1.0";
 
 const ALLOWED_ORIGINS = [
@@ -72,6 +73,7 @@ async function callModel(messages, temperature = 0.7) {
   });
   if (r.ok) {
     const j = await r.json();
+    addUsage(j.usage);
     const t = textFromContent(j?.choices?.[0]?.message?.content);
     if (t) return t;
   } else if (r.status === 401 || r.status === 403) {
@@ -90,6 +92,7 @@ async function callModel(messages, temperature = 0.7) {
   });
   if (!r2.ok) throw new Error(`model_${r2.status}: ${(await r2.text()).slice(0, 300)}`);
   const j2 = await r2.json();
+  addUsage(j2.usage);
   if (typeof j2.output_text === "string" && j2.output_text) return j2.output_text;
   const parts = [];
   for (const o of j2.output ?? []) {
@@ -97,6 +100,14 @@ async function callModel(messages, temperature = 0.7) {
     for (const c of o?.content ?? []) if (c?.text) parts.push(c.text);
   }
   return parts.join("");
+}
+
+function addUsage(u) {
+  if (!u || !USAGE) return;
+  const inp = u.prompt_tokens ?? u.input_tokens ?? 0;
+  const out = u.completion_tokens ?? u.output_tokens ?? 0;
+  const rea = u.completion_tokens_details?.reasoning_tokens ?? u.output_tokens_details?.reasoning_tokens ?? 0;
+  USAGE.in += inp; USAGE.out += out; USAGE.reasoning += rea; USAGE.calls++;
 }
 
 function parseJson(text) {
@@ -237,7 +248,7 @@ async function handle(req) {
         const q = String(body.q ?? "").trim().slice(0, 80);
         if (!q) return json({ error: "empty" }, 400, h);
         const out = await askJson(withProfile(LOOKUP, body), `Input: "${q}"`, 0.3);
-        return json(out, 200, h);
+        return json({ ...out, _usage: USAGE }, 200, h);
       }
 
       case "talk": {
@@ -261,7 +272,7 @@ async function handle(req) {
         const sys = TALK.replace("{N}", String(n)).replace("{NEW_HINT}", newHint).replace("{THEME}", theme);
         const user = `Learner's words (focus):\n${JSON.stringify(words)}\n\nAll known words (do not suggest these as new):\n${known.join(", ")}`;
         const out = await askJson(withProfile(sys, body), user, 0.9);
-        return json({ items: Array.isArray(out?.items) ? out.items : [] }, 200, h);
+        return json({ items: Array.isArray(out?.items) ? out.items : [], _usage: USAGE }, 200, h);
       }
 
       case "check": {
@@ -271,7 +282,7 @@ async function handle(req) {
           learner_answer: String(body.answer ?? "").slice(0, 300),
         });
         const out = await askJson(withProfile(CHECK, body), user, 0.3);
-        return json(out, 200, h);
+        return json({ ...out, _usage: USAGE }, 200, h);
       }
 
       case "profile": {
@@ -279,7 +290,7 @@ async function handle(req) {
         const events = (Array.isArray(body.events) ? body.events : []).slice(-80).map((e) => JSON.stringify(e).slice(0, 300));
         const user = `Previous notes:\n${old}\n\nRecent activity (oldest first):\n${events.join("\n")}`;
         const out = await askJson(PROFILE, user, 0.4);
-        return json(out, 200, h);
+        return json({ ...out, _usage: USAGE }, 200, h);
       }
 
       default:
@@ -295,6 +306,7 @@ async function handle(req) {
 export default {
   async fetch(req, env) {
     ENV = env;
+    USAGE = { in: 0, out: 0, reasoning: 0, calls: 0 };
     return handle(req);
   },
 };
