@@ -466,9 +466,9 @@
 
   function showBubble(html, kind, opts = {}) {
     clearTimeout(bubbleTimer);
-    bubble.innerHTML = html;
+    bubble.innerHTML = `<div class="b-inner">${html}</div>`;
     bubble.classList.remove('show-tr');
-    if (bubble.querySelector('.tr')) bubble.insertAdjacentHTML('afterbegin', '<button class="tr-toggle" data-act="tr" aria-label="Türkçe çeviri">TR</button>');
+    if (bubble.querySelector('.tr')) bubble.firstElementChild.insertAdjacentHTML('afterbegin', '<button class="tr-toggle" data-act="tr" aria-label="Türkçe çeviri">TR</button>');
     bubble.hidden = false;
     bubbleKind = kind;
     bubble.style.animation = 'none';
@@ -501,7 +501,8 @@
     bubble.style.left = left + 'px';
     bubble.style.bottom = (sr.height - hy + 14) + 'px';
     const cardTop = $('card').getBoundingClientRect().top;
-    bubble.style.maxHeight = Math.max(160, sr.top - cardTop + hy - 30) + 'px';
+    const inner = bubble.firstElementChild;
+    if (inner) inner.style.maxHeight = Math.max(140, sr.top - cardTop + hy - 54) + 'px';
     bubble.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
   }
   window.addEventListener('resize', placeBubble);

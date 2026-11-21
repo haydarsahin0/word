@@ -234,9 +234,14 @@ canvas {
   box-shadow: 3px 3px 0 var(--ink);
   transform-origin: var(--tail, 50%) 100%;
   animation: pop 0.22s cubic-bezier(.2, 1.4, .4, 1);
+}
+/* uzun balonlar içeride kayar; çubuk görünmez, alttaki kuyruk kesilmez */
+.b-inner {
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: none;
 }
+.b-inner::-webkit-scrollbar { display: none; }
 .bubble[hidden] { display: none; }
 .bubble::before, .bubble::after {
   content: '';
@@ -462,4 +467,38 @@ body.paused #pauseBtn .i-pause { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .ticker-track { animation: none; }
   .bubble { animation: none; }
+}
+
+/* ---------- bilgisayar: daha büyük ekran (sadece fare/klavye; iPad ve telefon etkilenmez) ---------- */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .card { width: min(760px, calc(100vw - 48px)); padding: 24px 26px 18px; border-radius: 26px; }
+  .stage { margin: 0 -26px; padding-top: 170px; }
+  .streak { font-size: 30px; }
+  .streak .unit { font-size: 18px; }
+  .cost b { font-size: 27px; }
+  .cost span { font-size: 14px; }
+  .ticker { font-size: 15px; height: 21px; margin-top: 10px; }
+  .count { font-size: 21px; }
+  .count em { font-size: 40px; }
+  .meter { font-size: 22px; gap: 12px; }
+  .meter.daily { font-size: 17.5px; }
+  .bar { width: 140px; height: 10px; }
+  .btn.icon { width: 46px; height: 42px; }
+  .btn.icon svg { transform: scale(1.2); }
+  .btn.sm { font-size: 16.5px; padding: 7px 12px; }
+  .word-form input { height: 42px; font-size: 18px; }
+  .bottom { padding-top: 16px; gap: 10px; }
+  .bubble { max-width: min(400px, calc(100% - 16px)); font-size: 18px; padding: 13px 16px 14px; border-radius: 14px; }
+  .b-tag { font-size: 14px; }
+  .b-word { font-size: 27px; }
+  .b-word .art { font-size: 19px; }
+  .b-mean, .b-ex, .b-simple { font-size: 17px; }
+  .b-ex .tr, .b-hint { font-size: 15.5px; }
+  .b-actions .btn.sm { font-size: 16px; padding: 6px 11px; }
+  .b-form input { font-size: 18px; padding: 7px 10px; }
+  .thought { max-width: min(290px, calc(100% - 16px)); font-size: 16.5px; padding: 8px 13px 9px; }
+  .r-flow { font-size: 17.5px; }
+  .r-title, .r-prog { font-size: 14px; }
+  .r-btn { font-size: 14.5px; }
+  .sheet { width: min(640px, calc(100vw - 48px)); }
 }
