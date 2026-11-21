@@ -10,7 +10,8 @@
   let usageCb = null;
 
   async function call(action, payload, ms = 25000) {
-    if (Date.now() < downUntil) throw new Error('ai_down');
+    const independent = action === 'image'; // görseller konuşma hatalarından etkilenmesin
+    if (!independent && Date.now() < downUntil) throw new Error('ai_down');
     // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri hariç
     if (action !== 'lookup' && !activeCheck()) throw new Error('inactive');
     const ctl = new AbortController();
@@ -26,14 +27,14 @@
       if (!r.ok || j.error) {
         lastError = j.error || 'http_' + r.status;
         // sunucu tarafı sorunlarında bir süre rahat bırak
-        if (r.status >= 500 || r.status === 404 || r.status === 429 || j.error === 'missing_key') downUntil = Date.now() + 2 * 60 * 1000;
+        if (!independent && (r.status >= 500 || r.status === 404 || r.status === 429 || j.error === 'missing_key')) downUntil = Date.now() + 2 * 60 * 1000;
         throw new Error(lastError);
       }
       lastError = '';
       if (j && j._usage && usageCb) { try { usageCb(j._usage, action); } catch (e) { /* yok say */ } }
       return j;
     } catch (e) {
-      if (e.name === 'AbortError' || e instanceof TypeError) {
+      if ((e.name === 'AbortError' || e instanceof TypeError) && !independent) {
         lastError = 'network';
         downUntil = Date.now() + 60 * 1000;
       }

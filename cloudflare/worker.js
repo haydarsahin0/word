@@ -228,7 +228,7 @@ const THEMES = [
 /* ---------- görsel yardımcıları ---------- */
 const IMG_MODEL = "muse-image-1.0";
 const IMG_STYLE_VERSION = "v1";
-const IMG_DAILY_LIMIT = 60; // beklenmedik masrafa karşı günlük üst sınır
+const IMG_DAILY_LIMIT = 150; // beklenmedik masrafa karşı günlük üst sınır (ilk toplu üretim için yeterli)
 
 function imageStore() {
   return ENV.IMAGES.get(ENV.IMAGES.idFromName("images"));

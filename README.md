@@ -46,8 +46,8 @@ Aynı kelime üst üste gelmez (az kelimede 25 sn, çok kelimede 90 sn ara).
 Her kelime için Meta'nın **Muse Image** modeliyle (`muse-image-1.0`, aynı `musebaba` anahtarı) uygulamanın tarzında
 — gri-yeşil zemin, koyu kahve piksel çizim, yazısız — bir görsel üretilir. Görsel kelime başına **bir kez** üretilir,
 Worker'daki bir Durable Object'te (`ImageStore`) saklanır ve `…/img/<anahtar>.png` adresinden sunulur; senkronla
-diğer cihaza da gelir. Kelime kartında küçük, yeni **„Was ist das?"** sorusunda büyük gösterilir. Eski kelimeler için
-de arka planda yavaş yavaş üretilir. Beklenmedik masrafa karşı günde en fazla 60 görsel; görsel başı ~0,02 $
+diğer cihaza da gelir. Kelime kartında küçük, yeni **„Was ist das?"** sorusunda büyük gösterilir. Görseli olmayan
+kelimeler için uygulama açıkken arka arkaya üretilir. Beklenmedik masrafa karşı günde en fazla 150 görsel; görsel başı ~0,02 $
 sağ üstteki maliyete eklenir.
 
 ### Kitap okuma

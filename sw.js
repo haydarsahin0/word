@@ -1,5 +1,5 @@
 /* Uygulama kabuğunu önbelleğe alır; çeviri istekleri her zaman ağdan gider. */
-const CACHE = 'kelime-defteri-v19';
+const CACHE = 'kelime-defteri-v21';
 const SHELL = ['./', 'index.html', 'css/style.css', 'js/sfx.js', 'js/dict.js', 'js/ai.js', 'js/translate.js', 'js/reader.js', 'js/scene.js', 'js/app.js', 'manifest.webmanifest', 'icons/icon.svg'];
 
 self.addEventListener('install', (e) => {

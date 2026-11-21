@@ -1278,28 +1278,49 @@
   // Kelime başına bir kez üretilir (sunucuda saklanır, cihazlar arası senkronlanır).
   const imgQueue = [];
   const imgTried = new Set();
+  const imgFails = new Map();
   let imgBusy = false;
   let imgNextAt = 0;
   function ensureImage(w) {
     if (!w || w.img || imgTried.has(w.id) || imgQueue.includes(w)) return;
     imgQueue.push(w);
   }
+  let imgBatchAnnounced = false;
   async function pumpImages() {
-    if (imgBusy || !imgQueue.length || Date.now() < imgNextAt || !window.AI || !AI.available() || !isActive()) return;
+    if (imgBusy || !imgQueue.length || Date.now() < imgNextAt || !window.AI || !isActive()) return;
     const w = imgQueue.shift();
     if (!state.words.includes(w) || w.img) return;
     imgBusy = true;
     imgTried.add(w.id);
+    const missingBefore = missingImages().length;
+    if (missingBefore > 1 && !imgBatchAnnounced && bubble.hidden) {
+      imgBatchAnnounced = true;
+      think(`ich male Bilder für deine Wörter… noch ${missingBefore}`, 5000);
+    }
     try {
       const url = await AI.image(w);
       if (url) { w.img = url; save(); if (!$('sheet').hidden) renderList(); }
     } catch (e) {
       if (String(e.message).includes('daily_limit')) imgNextAt = Date.now() + HOUR;
+      else {
+        // geçici hata: biraz sonra (en fazla 3 kez) yeniden dene
+        const n = (imgFails.get(w.id) || 0) + 1;
+        imgFails.set(w.id, n);
+        if (n < 3) { imgTried.delete(w.id); imgNextAt = Date.now() + 20000 * n; }
+      }
     }
     imgBusy = false;
-    imgNextAt = Math.max(imgNextAt, Date.now() + 4000);
+    imgNextAt = Math.max(imgNextAt, Date.now() + 1500);
+    // eksik görsel kalmayana kadar sıradakine hemen geç
+    const left = missingImages();
+    if (left.length) backfillImages();
+    else if (imgBatchAnnounced) {
+      imgBatchAnnounced = false;
+      if (bubble.hidden) think('fertig – jetzt hat jedes Wort ein Bild ✓', 5000);
+    }
   }
-  // eski kelimeler için de yavaş yavaş üret (her seferinde bir tane)
+  const missingImages = () => state.words.filter((x) => !x.img && !imgTried.has(x.id));
+  // görseli olmayan kelimeleri tek tek, arka arkaya üret
   function backfillImages() {
     if (imgQueue.length || imgBusy) return;
     const w = [...state.words].reverse().find((x) => !x.img && !imgTried.has(x.id));
@@ -1545,7 +1566,7 @@
     }
     refillQueue();
     pumpImages();
-    if (now % 20000 < 1000) backfillImages();
+    backfillImages();
     if (now % 15000 < 1000) maybeUpdateProfile();
     // senkron: değişiklik varsa 45 sn'de bir, yoksa 4 dk'da bir (diğer cihazdan gelenler için)
     if (state.sync.code && !syncing && (syncDirty ? now - lastSyncTry > 45000 : now - lastSyncTry > 4 * MIN)) syncNow();
