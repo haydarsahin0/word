@@ -59,6 +59,12 @@ Bir kelimeye dokununca kanka onu **o cümledeki anlamıyla** açıklar (ör. *gi
 olarak gösterir; **ins Heft** ile deftere eklenir. Okurken kanka araya soru sokmaz. Kitap yalnızca bu cihazda
 (IndexedDB) saklanır; EPUB için ek kütüphane yok (küçük ZIP okuyucu + tarayıcının `DecompressionStream`'i).
 
+### Soru türleri
+
+En sık gelen iki tür: **„Was ist das?"** (sadece kelimenin görseli gösterilir) ve **Türkçe → Almanca** (Türkçesi
+gösterilir, Almancası artikeliyle yazılır; **Tipp** artikeli ve ilk harfleri gösterir, ipucu alınan cevap "zor" sayılır).
+Arada boşluk doldurma, Almanca açıklamadan bulma, hatırlama ve modelin hazırladığı cümleler/sorular gelir.
+
 ### Akıllı tekrar
 
 SM-2 (Anki'nin yöntemi) benzeri: her kelimenin bir kolaylık puanı var. Cevap kalitesi doğruluk, cevap süresi

@@ -345,7 +345,7 @@
   const sfx = (n) => window.SFX && SFX.play(n);
   const ACT_SOUNDS = {
     close: 'pop', edit: 'edit', delete: 'del', reveal: 'reveal', later: 'later',
-    addnew: 'coin', addbook: 'coin', skip: 'whoosh', 'say-ex': 'bell',
+    addnew: 'coin', addbook: 'coin', skip: 'whoosh', 'say-ex': 'bell', hint: 'reveal',
   };
   const ID_SOUNDS = {
     menuBtn: 'menuOpen', closeSheet: 'menuClose', askBtn: 'ask', exportBtn: 'export',
@@ -795,13 +795,20 @@
     return state.words.filter((w) => w.due <= now).sort((a, b) => a.due - b.due);
   }
 
+  /** Soru türü seçimi: resimli soru ve Türkçeden Almancaya en sık; diğerleri arada */
   function pickMode(w, hasSentence) {
-    let modes;
-    if (w.level <= 1) modes = hasSentence ? ['recall', 'cloze', 'recall'] : ['recall', 'reverse'];
-    else modes = hasSentence ? ['cloze', 'cloze', 'reverse', 'recall'] : ['reverse', 'reverse', 'recall'];
-    if (w.img) modes.push('picture', 'picture'); // görsel varsa: "Was ist das?"
-    const other = modes.filter((m) => m !== w.lastMode);
-    return pick(other.length ? other : modes);
+    const weights = {
+      picture: w.img ? 5 : 0,          // "Was ist das?" — görsel
+      tr2de: w.tr ? 4 : 0,             // Türkçesini gör, Almancasını yaz
+      recall: w.level <= 1 ? 2 : 1,    // Almancasını gör, hatırla
+      cloze: hasSentence ? 1.5 : 0,    // boşluk doldurma
+      reverse: w.explain_de ? 1 : 0,   // Almanca açıklamadan bul
+    };
+    if (weights[w.lastMode]) weights[w.lastMode] *= 0.2; // aynı tür üst üste gelmesin
+    const entries = Object.entries(weights).filter(([, v]) => v > 0);
+    let r = Math.random() * entries.reduce((a, [, v]) => a + v, 0);
+    for (const [m, v] of entries) { r -= v; if (r <= 0) return m; }
+    return entries.length ? entries[0][0] : 'recall';
   }
 
   const REVIEW_OPTS = { autoClose: 120000, onTimeout: () => postpone() };
@@ -815,8 +822,9 @@
     if (!w) return;
     const hasSentence = freshSentences(w) > 0;
     mode = mode || pickMode(w, hasSentence);
-    if (mode === 'picture' && !w.img) mode = 'reverse';
-    const ex = mode === 'reverse' || mode === 'picture' ? null : nextSentence(w, true);
+    if (mode === 'picture' && !w.img) mode = 'tr2de';
+    if (mode === 'reverse' && !w.explain_de) mode = 'tr2de';
+    const ex = mode === 'reverse' || mode === 'picture' || mode === 'tr2de' ? null : nextSentence(w, true);
     const exW = ex && wordIn(ex.de, w);
     if (mode === 'cloze' && !exW) mode = 'reverse';
     w.lastMode = mode;
@@ -836,7 +844,14 @@
         <img class="b-img big" src="${esc(w.img)}" alt="">
         <div class="b-hint tr">${esc(w.tr)}</div>
         <form class="b-form" data-form="answer"><input name="a" placeholder="${w.pos === 'n' ? 'Artikel + Wort' : 'auf Deutsch'}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
-        <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
+        <div class="b-actions"><button class="btn sm" data-act="hint">Tipp</button><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
+    } else if (mode === 'tr2de') {
+      // Türkçe düşün, Almanca söyle: Türkçesi görünür, Almancası yazılır
+      current.answer = w.de;
+      showBubble(`<div class="b-tag">${pick(['Wie sagt man das auf Deutsch?', 'Und auf Deutsch?', 'Auf Deutsch, bitte!', `${nameTag('', ', ')}wie heißt das auf Deutsch?`])}</div>
+        <div class="b-big tr-prompt">„${esc(w.tr)}“</div>
+        <form class="b-form" data-form="answer"><input name="a" placeholder="${w.pos === 'n' ? 'Artikel + Wort' : 'auf Deutsch'}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
+        <div class="b-actions"><button class="btn sm" data-act="hint">Tipp</button><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
     } else if (mode === 'reverse') {
       current.answer = w.de;
       showBubble(`<div class="b-tag">${pick(['Wie heißt das auf Deutsch?', 'Welches Wort suche ich?', 'Na, wie sagt man das?'])}</div>
@@ -885,7 +900,7 @@
     let ok = a === b;
     let note = '';
     if (!ok && b.length >= 5 && lev(a, b) <= 1) { ok = true; note = `kleiner Tippfehler: <b>${esc(current.answer)}</b>`; }
-    if (ok && (current.mode === 'reverse' || current.mode === 'picture') && w.art) {
+    if (ok && ['reverse', 'picture', 'tr2de'].includes(current.mode) && w.art) {
       const m = input.trim().toLowerCase().match(/^(der|die|das)\s/);
       if (!m) note = note || `mit Artikel: <b>${esc(fullDe(w))}</b>`;
       else if (m[1] !== w.art) note = `Artikel: <b>${esc(w.art)}</b> – ${esc(fullDe(w))}`;
@@ -956,7 +971,8 @@
     const shownEx = current.ex || null;
     logEvent('quiz', { mode: current.mode, de: fullDe(w), tr: w.tr, ok, answer: current.input || (ok ? '(bildim)' : '(bilemedim)'), expected: current.answer });
     const now = Date.now();
-    const q = quality(ok, note, now - (current.started || now), current.mode);
+    let q = quality(ok, note, now - (current.started || now), current.mode);
+    if (ok && current.hinted) q = Math.min(q, 3); // ipucu aldıysan "zor" sayılır
     const advanced = review(w, q);
     const nextTxt = humanize(w.due - now);
     sfx(ok ? 'ok' : 'no');
@@ -1116,13 +1132,20 @@
     // 1) Zamanı gelen kelimeler öncelikli (aralıklı tekrar)
     if (due.length && (Math.random() < 0.65 || !aiQueue.length)) {
       const w0 = due[0];
-      const ai = aiQueue.findIndex((it) => ['cloze', 'ask', 'example'].includes(it.type) && it.id === w0.id);
+      // çoğunlukla resimli ya da Türkçe→Almanca soru; arada modelin hazırladığı cümleler
+      const ai = Math.random() < 0.3 ? aiQueue.findIndex((it) => ['cloze', 'ask', 'example'].includes(it.type) && it.id === w0.id) : -1;
       if (ai >= 0 && showAiItem(aiQueue.splice(ai, 1)[0])) return;
-      // elimizde taze cümle yoksa: cümlesiz soru sor, model yenilerini hazırlasın
-      if (!freshSentences(w0)) { aiNextFetch = 0; return startReview(w0, w0.lastMode === 'reverse' ? 'recall' : 'reverse'); }
+      if (!freshSentences(w0)) aiNextFetch = 0;
       return startReview(w0);
     }
-    // 2) Modelin hazırladıkları — kelimesi "dinlenen" maddeler sırada bekler
+    // 2) yarı yarıya: dinlenmiş bir kelimeyi resimli / Türkçe→Almanca sor (ekstra pratik)
+    const restedNow = state.words.filter((w) => !cooling(w) && (w.img || w.tr));
+    if (restedNow.length && Math.random() < 0.5) {
+      const pscore = (x) => seenTodayOf(x) + x.level * 3 - difficulty(x) * 4;
+      const w = pick([...restedNow].sort((a, b) => pscore(a) - pscore(b)).slice(0, 4));
+      return startReview(w, w.img && Math.random() < 0.55 ? 'picture' : 'tr2de');
+    }
+    // 3) Modelin hazırladıkları — kelimesi "dinlenen" maddeler sırada bekler
     aiQueue = aiQueue.filter((it) => Date.now() - (it._t || 0) < 20 * MIN);
     for (let i = 0; i < aiQueue.length; i++) {
       const it = aiQueue[i];
@@ -1440,6 +1463,14 @@
     else if (act === 'knew') grade(true, '');
     else if (act === 'forgot') grade(false, '');
     else if (act === 'giveup') grade(false, '');
+    else if (act === 'hint' && current) {
+      current.hinted = true;
+      const w = current.w;
+      const inp = bubble.querySelector('form[data-form=answer] input');
+      const tip = (w.art ? w.art + ' ' : '') + w.de.slice(0, Math.max(2, Math.ceil(w.de.length / 3))) + '…';
+      if (inp) { inp.placeholder = tip; inp.value = ''; inp.focus({ preventScroll: true }); }
+      b.disabled = true; b.textContent = tip;
+    }
     else if (act === 'later') { if (current) logEvent('postponed', { de: fullDe(current.w), mode: current.mode }); postpone(); hideBubble(); }
     else if (act === 'addnew') addSuggested();
     else if (act === 'addbook') addFromBook();
