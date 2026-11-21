@@ -75,6 +75,12 @@
     return call('check', { q_de, word, answer });
   }
 
+  /** Kelime görseli (Muse Image) — kelime başına bir kez üretilir, sunucuda saklanır */
+  async function image(w) {
+    const j = await call('image', { de: w.de, art: w.art || '', tr: w.tr || '', explain: w.explain_de || '' }, 120000);
+    return j.url || null;
+  }
+
   async function profile(old, events) {
     return call('profile', { old, events }, 45000);
   }
@@ -110,7 +116,7 @@
   };
 
   window.AI = {
-    lookup, talk, check, profile,
+    lookup, talk, check, profile, image,
     setProfileProvider: (fn) => { profileProvider = fn; },
     setActiveCheck: (fn) => { activeCheck = fn; },
     onUsage: (fn) => { usageCb = fn; },

@@ -299,9 +299,10 @@
   /* ---------- canlı maliyet (sağ üst) ---------- */
   // Muse Ember fiyatı (1 milyon token başına, USD). Meta panelindeki fiyat farklıysa burayı değiştir.
   const PRICE_IN = 0.10 / 1e6, PRICE_OUT = 0.50 / 1e6;
+  const PRICE_IMG = 0.02; // Muse Image, görsel başına (tahmini; Meta panelinden kontrol et)
   const COST_VIEWS = { day: 'heute', month: 'diesen Monat', total: 'insgesamt' };
   function addCost(u) {
-    const usd = (u.in || 0) * PRICE_IN + (u.out || 0) * PRICE_OUT;
+    const usd = (u.in || 0) * PRICE_IN + (u.out || 0) * PRICE_OUT + (u.images || 0) * PRICE_IMG;
     const k = todayKey();
     const d = state.cost.days[k] || (state.cost.days[k] = { usd: 0, in: 0, out: 0, calls: 0 });
     d.usd += usd; d.in += u.in || 0; d.out += u.out || 0; d.calls += u.calls || 1;
@@ -657,7 +658,8 @@
     const meaning = w.meaning_tr ? `<div class="b-hint tr">${esc(w.meaning_tr)}</div>` : '';
     const simple = w.explain_de ? `<div class="b-simple"><span>einfach gesagt</span>${esc(w.explain_de)}</div>` : '';
     const sayLine = opts.say && w.say_de ? `<div class="b-say">${esc(w.say_de)}</div>` : '';
-    return `<div class="b-tag">${tag}</div>${sayLine}
+    const img = w.img && !opts.noImg ? `<img class="b-img" src="${esc(w.img)}" alt="" loading="lazy">` : '';
+    return `<div class="b-tag">${tag}</div>${img}${sayLine}
       <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
       <div class="b-mean">${esc(w.tr)}${alts}${plural}</div>${meaning}${simple}${ex}`;
   }
@@ -738,6 +740,7 @@
     if (res.ex) markShown(res.ex.de);
     state.words.push(w);
     touch(w);
+    if (typeof ensureImage === 'function') setTimeout(() => ensureImage(w), 0);
     day().added = todayAdded();
     save();
     render();
@@ -796,6 +799,7 @@
     let modes;
     if (w.level <= 1) modes = hasSentence ? ['recall', 'cloze', 'recall'] : ['recall', 'reverse'];
     else modes = hasSentence ? ['cloze', 'cloze', 'reverse', 'recall'] : ['reverse', 'reverse', 'recall'];
+    if (w.img) modes.push('picture', 'picture'); // görsel varsa: "Was ist das?"
     const other = modes.filter((m) => m !== w.lastMode);
     return pick(other.length ? other : modes);
   }
@@ -811,7 +815,8 @@
     if (!w) return;
     const hasSentence = freshSentences(w) > 0;
     mode = mode || pickMode(w, hasSentence);
-    const ex = mode === 'reverse' ? null : nextSentence(w, true);
+    if (mode === 'picture' && !w.img) mode = 'reverse';
+    const ex = mode === 'reverse' || mode === 'picture' ? null : nextSentence(w, true);
     const exW = ex && wordIn(ex.de, w);
     if (mode === 'cloze' && !exW) mode = 'reverse';
     w.lastMode = mode;
@@ -824,6 +829,13 @@
         <div class="b-ex" style="border:0;margin:0;padding:0">„${highlight(ex.de, exW, 'gap')}“</div>
         <div class="b-hint">Tipp: ${esc(w.explain_de ? maskWord(w.explain_de, w) : w.tr)}${w.explain_de ? `<span class="tr"> · ${esc(w.tr)}</span>` : ''}${ex.tr ? `<span class="tr"><i>${esc(ex.tr)}</i></span>` : ''}</div>
         <form class="b-form" data-form="answer"><input name="a" placeholder="welches Wort?" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
+        <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
+    } else if (mode === 'picture') {
+      current.answer = w.de;
+      showBubble(`<div class="b-tag">${pick(['Was ist das?', 'Na, was siehst du?', 'Wie heißt das auf Deutsch?'])}</div>
+        <img class="b-img big" src="${esc(w.img)}" alt="">
+        <div class="b-hint tr">${esc(w.tr)}</div>
+        <form class="b-form" data-form="answer"><input name="a" placeholder="${w.pos === 'n' ? 'Artikel + Wort' : 'auf Deutsch'}" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
         <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
     } else if (mode === 'reverse') {
       current.answer = w.de;
@@ -873,7 +885,7 @@
     let ok = a === b;
     let note = '';
     if (!ok && b.length >= 5 && lev(a, b) <= 1) { ok = true; note = `kleiner Tippfehler: <b>${esc(current.answer)}</b>`; }
-    if (ok && current.mode === 'reverse' && w.art) {
+    if (ok && (current.mode === 'reverse' || current.mode === 'picture') && w.art) {
       const m = input.trim().toLowerCase().match(/^(der|die|das)\s/);
       if (!m) note = note || `mit Artikel: <b>${esc(fullDe(w))}</b>`;
       else if (m[1] !== w.art) note = `Artikel: <b>${esc(w.art)}</b> – ${esc(fullDe(w))}`;
@@ -1262,6 +1274,38 @@
       <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'feedback', { autoClose: 15000 });
   }
 
+  /* ---------- kelime görselleri (Muse Image) ---------- */
+  // Kelime başına bir kez üretilir (sunucuda saklanır, cihazlar arası senkronlanır).
+  const imgQueue = [];
+  const imgTried = new Set();
+  let imgBusy = false;
+  let imgNextAt = 0;
+  function ensureImage(w) {
+    if (!w || w.img || imgTried.has(w.id) || imgQueue.includes(w)) return;
+    imgQueue.push(w);
+  }
+  async function pumpImages() {
+    if (imgBusy || !imgQueue.length || Date.now() < imgNextAt || !window.AI || !AI.available() || !isActive()) return;
+    const w = imgQueue.shift();
+    if (!state.words.includes(w) || w.img) return;
+    imgBusy = true;
+    imgTried.add(w.id);
+    try {
+      const url = await AI.image(w);
+      if (url) { w.img = url; save(); if (!$('sheet').hidden) renderList(); }
+    } catch (e) {
+      if (String(e.message).includes('daily_limit')) imgNextAt = Date.now() + HOUR;
+    }
+    imgBusy = false;
+    imgNextAt = Math.max(imgNextAt, Date.now() + 4000);
+  }
+  // eski kelimeler için de yavaş yavaş üret (her seferinde bir tane)
+  function backfillImages() {
+    if (imgQueue.length || imgBusy) return;
+    const w = [...state.words].reverse().find((x) => !x.img && !imgTried.has(x.id));
+    if (w) ensureImage(w);
+  }
+
   /* ---------- kitap: kelimeye dokun → anlamı, deftere ekle ---------- */
   let readerQuietUntil = 0;
   let pendingBook = null;
@@ -1500,6 +1544,8 @@
       idleThought();
     }
     refillQueue();
+    pumpImages();
+    if (now % 20000 < 1000) backfillImages();
     if (now % 15000 < 1000) maybeUpdateProfile();
     // senkron: değişiklik varsa 45 sn'de bir, yoksa 4 dk'da bir (diğer cihazdan gelenler için)
     if (state.sync.code && !syncing && (syncDirty ? now - lastSyncTry > 45000 : now - lastSyncTry > 4 * MIN)) syncNow();
@@ -1604,7 +1650,7 @@
     const list = state.words.filter((w) => !q || T.key(w.de).includes(q) || T.lowerTr(w.tr).includes(q)).slice().reverse();
     $('wordList').innerHTML = list.length ? list.map((w) => {
       const lv = Math.min(5, Math.ceil(w.level / 2));
-      return `<li><div><span class="de">${w.art ? `<small>${esc(w.art)}</small> ` : ''}${esc(w.de)}</span><span class="tr">${esc(w.tr)}</span></div>
+      return `<li>${w.img ? `<img class="li-img" src="${esc(w.img)}" alt="" loading="lazy">` : '<span class="li-img"></span>'}<div><span class="de">${w.art ? `<small>${esc(w.art)}</small> ` : ''}${esc(w.de)}</span><span class="tr">${esc(w.tr)}</span></div>
         <span class="seen">${seenTodayOf(w) ? seenTodayOf(w) + '×' : ''}</span><span class="lv" title="seviye ${w.level} · sonraki tekrar ${humanize(Math.max(0, w.due - Date.now()))}${difficulty(w) > 1.4 ? ' · zor kelime' : ''}">${difficulty(w) > 1.4 ? '<b class="hard">!</b>' : ''}${[0, 1, 2, 3, 4].map((i) => `<i class="${i < lv ? 'f' : ''}"></i>`).join('')}</span>
         <button class="del" data-id="${w.id}" aria-label="sil">×</button></li>`;
     }).join('') : '<li class="empty">Henüz kelime yok.</li>';

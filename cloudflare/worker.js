@@ -225,10 +225,75 @@ const THEMES = [
 ];
 
 /* ---------- sunucu ---------- */
+/* ---------- görsel yardımcıları ---------- */
+const IMG_MODEL = "muse-image-1.0";
+const IMG_STYLE_VERSION = "v1";
+const IMG_DAILY_LIMIT = 60; // beklenmedik masrafa karşı günlük üst sınır
+
+function imageStore() {
+  return ENV.IMAGES.get(ENV.IMAGES.idFromName("images"));
+}
+
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function imagePrompt(art, de, tr, hint) {
+  return [
+    "Minimal monochrome pixel-art illustration in the style of an old LCD handheld screen:",
+    "only dark brown (#2b2422) pixels on a flat pale grey-green background (#a9aea6), thin 1-pixel outlines, a little dithering,",
+    "cute, simple and centered; the object fills about 70% of the image, no frame.",
+    `It must make the meaning of the German word "${(art + " " + de).trim()}" (Turkish: "${tr}") instantly clear and memorable,`,
+    hint ? `meaning: ${hint}.` : "",
+    "Show one clear object or a tiny scene. Absolutely no text, letters, numbers or labels anywhere in the image.",
+  ].join(" ");
+}
+
+/** base64 verinin ilk baytlarından görsel türünü bul */
+function sniffType(b64) {
+  const head = atob(b64.slice(0, 24));
+  if (head.startsWith("RIFF")) return "image/webp";
+  if (head.charCodeAt(0) === 0xff && head.charCodeAt(1) === 0xd8) return "image/jpeg";
+  return "image/png";
+}
+
+async function generateImage(prompt) {
+  const key = apiKey();
+  if (!key) throw new Error("missing_key");
+  const r = await fetch(`${BASE}/images/generations`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: IMG_MODEL, prompt, n: 1, size: "1024x1024", response_format: "b64_json" }),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`image_${r.status}: ${text.slice(0, 300)}`);
+  const j = JSON.parse(text);
+  const d = (j.data || [])[0] || {};
+  if (d.b64_json) return { b64: d.b64_json, type: sniffType(d.b64_json) };
+  if (d.url) {
+    const ir = await fetch(d.url);
+    const buf = new Uint8Array(await ir.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+    return { b64: btoa(bin), type: ir.headers.get("content-type") || "image/png" };
+  }
+  throw new Error("image_empty: " + text.slice(0, 200));
+}
+
 async function handle(req) {
   const origin = req.headers.get("origin");
   const h = cors(origin);
   if (req.method === "OPTIONS") return new Response("ok", { headers: h });
+  if (req.method === "GET") {
+    const m = new URL(req.url).pathname.match(/^\/img\/([a-f0-9]{64})\.(png|jpg|webp)$/);
+    if (!m || !ENV.IMAGES) return new Response("not found", { status: 404 });
+    const r = await imageStore().fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "get", key: m[1] }) });
+    if (r.status !== 200) return new Response("not found", { status: 404 });
+    const { b64, type } = await r.json();
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return new Response(bytes, { headers: { "Content-Type": type || "image/png", "Cache-Control": "public, max-age=31536000, immutable", "Access-Control-Allow-Origin": "*" } });
+  }
   if (req.method !== "POST") return json({ error: "method" }, 405, h);
   if (origin && !ALLOWED_ORIGINS.some((r) => r.test(origin))) return json({ error: "origin" }, 403, h);
 
@@ -266,6 +331,28 @@ async function handle(req) {
         const stub = ENV.SYNCROOM.get(ENV.SYNCROOM.idFromName(key));
         const r = await stub.fetch("https://sync-room/", { method: "POST", body: str });
         return json(await r.json(), r.status, h);
+      }
+
+      // ---------- kelime görseli (Muse Image) ----------
+      // Kelime başına bir kez üretilir ve saklanır; aynı kelime için tekrar para ödenmez.
+      case "image": {
+        if (!ENV.IMAGES) return json({ error: "no_store" }, 500, h);
+        const de = String(body.de ?? "").trim().slice(0, 60);
+        const art = ["der", "die", "das"].includes(String(body.art)) ? String(body.art) : "";
+        const tr = String(body.tr ?? "").trim().slice(0, 60);
+        const hint = String(body.explain ?? "").trim().slice(0, 240);
+        if (!de) return json({ error: "empty" }, 400, h);
+        const key = await sha256(`${IMG_STYLE_VERSION}|${art} ${de}`.toLowerCase());
+        const url = new URL(req.url).origin + `/img/${key}.png`;
+        const store = imageStore();
+        const have = await (await store.fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "has", key }) })).json();
+        if (have.has) return json({ url, cached: true }, 200, h);
+        const quota = await (await store.fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "quota", limit: IMG_DAILY_LIMIT }) })).json();
+        if (!quota.ok) return json({ error: "daily_limit" }, 429, h);
+        const prompt = imagePrompt(art, de, tr, hint);
+        const img = await generateImage(prompt);
+        await store.fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "put", key, b64: img.b64, type: img.type }) });
+        return json({ url, cached: false, _usage: { ...USAGE, images: 1 } }, 200, h);
       }
 
       case "ping":
@@ -358,5 +445,35 @@ export class SyncRoom {
     }
     const all = await this.ctx.storage.list({ prefix: "dev:" });
     return Response.json({ docs: [...all.values()].filter(Boolean) });
+  }
+}
+
+/** Kelime görselleri: anahtar → base64 görsel, bir de günlük sayaç. */
+export class ImageStore {
+  constructor(ctx) {
+    this.ctx = ctx;
+  }
+  async fetch(req) {
+    const { op, key, b64, type, limit } = await req.json();
+    const st = this.ctx.storage;
+    if (op === "has") return Response.json({ has: !!(await st.get("img:" + key)) });
+    if (op === "get") {
+      const v = await st.get("img:" + key);
+      return v ? Response.json(v) : new Response("{}", { status: 404 });
+    }
+    if (op === "put") {
+      await st.put("img:" + key, { b64, type });
+      return Response.json({ ok: true });
+    }
+    if (op === "quota") {
+      const day = new Date().toISOString().slice(0, 10);
+      const q = (await st.get("quota")) || { day, n: 0 };
+      if (q.day !== day) { q.day = day; q.n = 0; }
+      if (q.n >= limit) return Response.json({ ok: false, n: q.n });
+      q.n++;
+      await st.put("quota", q);
+      return Response.json({ ok: true, n: q.n });
+    }
+    return new Response("{}", { status: 400 });
   }
 }
