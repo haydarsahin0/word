@@ -502,7 +502,16 @@
     bubble.style.bottom = (sr.height - hy + 14) + 'px';
     const cardTop = $('card').getBoundingClientRect().top;
     const inner = bubble.firstElementChild;
-    if (inner) inner.style.maxHeight = Math.max(140, sr.top - cardTop + hy - 54) + 'px';
+    if (inner) {
+      const maxH = Math.max(140, sr.top - cardTop + hy - 54);
+      inner.classList.remove('scrolls');
+      inner.style.maxHeight = '';
+      // sadece gerçekten sığmıyorsa kaydır (birkaç piksellik taşma için asla)
+      if (inner.scrollHeight > maxH + 4) {
+        inner.style.maxHeight = maxH + 'px';
+        inner.classList.add('scrolls');
+      }
+    }
     bubble.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
   }
   window.addEventListener('resize', placeBubble);
