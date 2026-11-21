@@ -340,7 +340,7 @@ canvas {
 
 .b-img {
   float: right;
-  width: 84px; height: 84px;
+  width: 108px; height: 108px;
   margin: 2px 0 6px 10px;
   border-radius: 8px;
   border: 1.5px solid var(--ink);
@@ -348,7 +348,7 @@ canvas {
   mix-blend-mode: multiply;
   background: var(--bg);
 }
-.b-img.big { float: none; display: block; width: 170px; height: 170px; margin: 6px auto 4px; }
+.b-img.big { float: none; display: block; width: 210px; height: 210px; margin: 6px auto 4px; }
 .b-say { font-style: italic; font-size: 15px; margin: 1px 0 4px; }
 .b-simple {
   margin-top: 7px;
@@ -508,8 +508,8 @@ body.paused #pauseBtn .i-pause { display: none; }
   .b-tag { font-size: 14px; }
   .b-word { font-size: 27px; }
   .b-word .art { font-size: 19px; }
-  .b-img { width: 104px; height: 104px; }
-  .b-img.big { width: 210px; height: 210px; }
+  .b-img { width: 128px; height: 128px; }
+  .b-img.big { width: 260px; height: 260px; }
   .b-mean, .b-ex, .b-simple { font-size: 17px; }
   .b-ex .tr, .b-hint { font-size: 15.5px; }
   .b-actions .btn.sm { font-size: 16px; padding: 6px 11px; }

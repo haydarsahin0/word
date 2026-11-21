@@ -1276,20 +1276,22 @@
 
   /* ---------- kelime görselleri (Muse Image) ---------- */
   // Kelime başına bir kez üretilir (sunucuda saklanır, cihazlar arası senkronlanır).
+  const IMG_VERSION = 2; // v2: anlamı bir bakışta anlatan sahneler — eski görseller yeniden üretilir
+  const hasCurrentImg = (w) => !!w.img && w.imgV === IMG_VERSION;
   const imgQueue = [];
   const imgTried = new Set();
   const imgFails = new Map();
   let imgBusy = false;
   let imgNextAt = 0;
   function ensureImage(w) {
-    if (!w || w.img || imgTried.has(w.id) || imgQueue.includes(w)) return;
+    if (!w || hasCurrentImg(w) || imgTried.has(w.id) || imgQueue.includes(w)) return;
     imgQueue.push(w);
   }
   let imgBatchAnnounced = false;
   async function pumpImages() {
     if (imgBusy || !imgQueue.length || Date.now() < imgNextAt || !window.AI || !isActive()) return;
     const w = imgQueue.shift();
-    if (!state.words.includes(w) || w.img) return;
+    if (!state.words.includes(w) || hasCurrentImg(w)) return;
     imgBusy = true;
     imgTried.add(w.id);
     const missingBefore = missingImages().length;
@@ -1299,7 +1301,7 @@
     }
     try {
       const url = await AI.image(w);
-      if (url) { w.img = url; save(); if (!$('sheet').hidden) renderList(); }
+      if (url) { w.img = url; w.imgV = IMG_VERSION; save(); if (!$('sheet').hidden) renderList(); }
     } catch (e) {
       if (String(e.message).includes('daily_limit')) imgNextAt = Date.now() + HOUR;
       else {
@@ -1319,11 +1321,11 @@
       if (bubble.hidden) think('fertig – jetzt hat jedes Wort ein Bild ✓', 5000);
     }
   }
-  const missingImages = () => state.words.filter((x) => !x.img && !imgTried.has(x.id));
+  const missingImages = () => state.words.filter((x) => !hasCurrentImg(x) && !imgTried.has(x.id));
   // görseli olmayan kelimeleri tek tek, arka arkaya üret
   function backfillImages() {
     if (imgQueue.length || imgBusy) return;
-    const w = [...state.words].reverse().find((x) => !x.img && !imgTried.has(x.id));
+    const w = [...state.words].reverse().find((x) => !hasCurrentImg(x) && !imgTried.has(x.id));
     if (w) ensureImage(w);
   }
 
@@ -1550,11 +1552,14 @@
     if (state.paused) { scene.setMood('sleep'); return; }
     if (!isActive()) { if (!dormant) fallAsleep(); return; } // bakmıyorsan hiçbir şey çağrılmaz
     if (busy) return;
-    if (!bubbleKind && now > moodUntil) {
+    if (!bubbleKind && now < readerQuietUntil && now > moodUntil) {
+      setMood('reading', 3000); // sen okurken o da okuyor
+    } else if (!bubbleKind && now > moodUntil) {
       const r = Math.random();
-      const m = r < 0.62 ? 'typing' : r < 0.82 ? 'thinking' : 'window';
-      setMood(m, (m === 'typing' ? 7000 : 3500) + Math.random() * 6000);
-    } else if (bubbleKind && now > moodUntil && ['talking', 'happy', 'sad', 'listening'].includes(scene.mood)) {
+      const m = r < 0.5 ? 'typing' : r < 0.66 ? 'thinking' : r < 0.77 ? 'window' : r < 0.9 ? 'coffee' : 'stretch';
+      const dur = { typing: 7000 + Math.random() * 6000, thinking: 3500 + Math.random() * 4000, window: 3500 + Math.random() * 4000, coffee: 2900, stretch: 2400 }[m];
+      setMood(m, dur);
+    } else if (bubbleKind && now > moodUntil && ['talking', 'happy', 'sad', 'listening', 'reading'].includes(scene.mood)) {
       scene.setMood('waiting');
     }
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;

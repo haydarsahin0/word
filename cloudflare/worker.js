@@ -227,7 +227,7 @@ const THEMES = [
 /* ---------- sunucu ---------- */
 /* ---------- görsel yardımcıları ---------- */
 const IMG_MODEL = "muse-image-1.0";
-const IMG_STYLE_VERSION = "v1";
+const IMG_STYLE_VERSION = "v2"; // v2: önce sahne tasarlanır, sonra çizilir (anlam bir bakışta anlaşılsın)
 const IMG_DAILY_LIMIT = 150; // beklenmedik masrafa karşı günlük üst sınır (ilk toplu üretim için yeterli)
 
 function imageStore() {
@@ -239,14 +239,25 @@ async function sha256(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function imagePrompt(art, de, tr, hint) {
+const SCENE = `You design ONE picture for a vocabulary flashcard. Looking at the picture alone, a learner must
+instantly understand the meaning of the word — no text will be shown.
+Rules:
+- Concrete and unambiguous. Use everyday people, objects and actions.
+- Nouns: show the thing itself, large and typical, maybe in its usual place.
+- Verbs: show a person clearly doing the action (mid-action, with visible result or direction).
+- Adjectives/adverbs: show a very clear example, ideally with a contrast (e.g. "langsam": a snail next to a tired runner).
+- Abstract words: a classic, obvious everyday situation (e.g. "Geduld": a person calmly smiling while waiting in a very long queue,
+  a clock on the wall; "verweisen": a receptionist pointing a visitor to another door with an arrow sign).
+- Never rely on writing, letters, numbers or speech bubbles to explain.
+Return ONLY JSON: {"scene": "<2-3 English sentences describing the picture: subject, action, key objects, composition>"}`;
+
+function imagePrompt(scene) {
   return [
-    "Minimal monochrome pixel-art illustration in the style of an old LCD handheld screen:",
-    "only dark brown (#2b2422) pixels on a flat pale grey-green background (#a9aea6), thin 1-pixel outlines, a little dithering,",
-    "cute, simple and centered; the object fills about 70% of the image, no frame.",
-    `It must make the meaning of the German word "${(art + " " + de).trim()}" (Turkish: "${tr}") instantly clear and memorable,`,
-    hint ? `meaning: ${hint}.` : "",
-    "Show one clear object or a tiny scene. Absolutely no text, letters, numbers or labels anywhere in the image.",
+    "Detailed, charming pixel-art illustration, like a Game Boy game cutscene.",
+    "Strict 4-tone palette: very dark brown #2b2422, dark taupe #5e5853, grey-green #848b82, pale grey-green background #a9aea6.",
+    "Clean readable shapes, clear silhouettes, soft dithering for shading, centered composition that fills the frame, no border.",
+    "Scene:", scene,
+    "Absolutely no text, letters, numbers, labels or speech bubbles anywhere in the image.",
   ].join(" ");
 }
 
@@ -349,10 +360,17 @@ async function handle(req) {
         if (have.has) return json({ url, cached: true }, 200, h);
         const quota = await (await store.fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "quota", limit: IMG_DAILY_LIMIT }) })).json();
         if (!quota.ok) return json({ error: "daily_limit" }, 429, h);
-        const prompt = imagePrompt(art, de, tr, hint);
-        const img = await generateImage(prompt);
+        // 1) dil modeli anlamı bir bakışta anlatan somut bir sahne tasarlar, 2) görsel modeli onu çizer
+        EFFORT = "low";
+        let scene = "";
+        try {
+          const sc = await askJson(SCENE, JSON.stringify({ word: (art + " " + de).trim(), turkish: tr, meaning: hint }), 0.6);
+          scene = String(sc.scene || "").slice(0, 600);
+        } catch (e) { /* sahne yoksa sade tarif */ }
+        if (!scene) scene = `A clear picture that shows the meaning of the German word "${(art + " " + de).trim()}" (Turkish: "${tr}"). ${hint}`;
+        const img = await generateImage(imagePrompt(scene));
         await store.fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "put", key, b64: img.b64, type: img.type }) });
-        return json({ url, cached: false, _usage: { ...USAGE, images: 1 } }, 200, h);
+        return json({ url, cached: false, scene, _usage: { ...USAGE, images: 1 } }, 200, h);
       }
 
       case "ping":

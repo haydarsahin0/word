@@ -1,7 +1,10 @@
 /* Piksel sahne: masada oturan, daktilo yazan küçük karakter.
-   Tüm çizim mantıksal piksellerle yapılır, tam sayı ölçekle büyütülür. */
+   Tüm çizim mantıksal piksellerle yapılır, tam sayı ölçekle büyütülür.
+   Renkler: INK (çizgi), MID (gölge/doku), LT (ışık), BG (zemin). */
 (function () {
   const INK = '#2b2422';
+  const MID = '#6f6c66';
+  const LT = '#c4c8bf';
   const BG = '#a9aea6';
   const DESIGN_W = 220;
   const H = 92;
@@ -14,6 +17,7 @@
     [3, 11, 1, 9],
     [15, 7, 13, 5],
   ];
+  const CALM = ['typing', 'waiting', 'listening', 'window', 'talking', 'reading', 'thinking'];
 
   class Scene {
     constructor(canvas) {
@@ -21,11 +25,17 @@
       this.ctx = canvas.getContext('2d');
       this.mood = 'typing';
       this.moodAt = performance.now();
-      this.f = 0;
+      this.f = 0;   // ruh hâli başladığından beri kare
+      this.t = 0;   // toplam kare
       this.lines = [0];
       this.armPhase = 0;
+      this.key = -1;
+      this.ding = 0;
       this.blinkUntil = 0;
       this.nextBlink = performance.now() + 2500;
+      this.parts = [];
+      this.bird = null;
+      this.catTail = 0;
       this.W = DESIGN_W;
       this.ox = 0;
       this.k = 2;
@@ -61,7 +71,7 @@
 
     /** Kafanın üst ortası, canvas'a göre css piksel olarak */
     headAnchor() {
-      return { x: (HEAD_X + 7 + this.ox) * this.pcss, y: (HEAD_Y - 1) * this.pcss };
+      return { x: (HEAD_X + 7 + this.ox) * this.pcss, y: (HEAD_Y - 2) * this.pcss };
     }
 
     groundY() {
@@ -73,12 +83,24 @@
       this.mood = m;
       this.moodAt = performance.now();
       this.f = 0;
+      if (m === 'happy') this.confetti();
+    }
+
+    confetti() {
+      for (let i = 0; i < 16; i++) {
+        this.parts.push({
+          x: HEAD_X + 7 + (Math.random() * 30 - 15), y: HEAD_Y - 4 - Math.random() * 6,
+          vx: Math.random() * 1.6 - 0.8, vy: -1.2 - Math.random() * 1.2,
+          life: 14 + Math.floor(Math.random() * 10), c: Math.random() < 0.5 ? INK : MID,
+        });
+      }
     }
 
     loop(t) {
-      if (t - this.last > 120) {
+      if (t - this.last > 110) {
         this.last = t;
         this.f++;
+        this.t++;
         this.step(t);
         this.draw();
       }
@@ -87,18 +109,32 @@
 
     step(t) {
       if (t > this.nextBlink) {
-        this.blinkUntil = t + 140;
+        this.blinkUntil = t + 130;
         this.nextBlink = t + 2200 + Math.random() * 4200;
       }
       if (this.mood === 'typing') {
         this.armPhase = Math.random() < 0.6 ? 1 - this.armPhase : this.armPhase;
+        this.key = Math.floor(Math.random() * 7);
         if (this.f % 2 === 0) {
           const cur = this.lines.length - 1;
           if (this.lines[cur] < 7) this.lines[cur]++;
-          else if (this.lines.length < 4) this.lines.push(0);
-          else this.lines = [0];
+          else {
+            this.ding = 5; // satır sonu: "ding"
+            if (this.lines.length < 4) this.lines.push(0);
+            else this.lines = [0];
+          }
         }
-      }
+      } else this.key = -1;
+      if (this.ding > 0) this.ding--;
+      // konfeti
+      this.parts.forEach((p) => { p.x += p.vx; p.y += p.vy; p.vy += 0.25; p.life--; });
+      this.parts = this.parts.filter((p) => p.life > 0 && p.y < GROUND);
+      // pencerede kuş (gündüz)
+      if (!this.bird && this.timeOfDay() !== 'night' && Math.random() < 0.012) this.bird = { x: 116, y: 34 + Math.floor(Math.random() * 12) };
+      if (this.bird) { this.bird.x += 1; this.bird.y += (this.t % 4 === 0 ? (Math.random() < 0.5 ? -1 : 1) : 0); if (this.bird.x > 142) this.bird = null; }
+      // kedinin kuyruğu ara ara sallanır
+      if (Math.random() < 0.03) this.catTail = 8;
+      if (this.catTail > 0) this.catTail--;
     }
 
     timeOfDay() {
@@ -109,13 +145,18 @@
     }
 
     /* ---------- çizim yardımcıları ---------- */
+    col(c) { this.ctx.fillStyle = c; }
     P(x, y) { this.ctx.fillRect(x + this.ox, y, 1, 1); }
     R(x, y, w, h) { this.ctx.fillRect(x + this.ox, y, w, h); }
-    C(x, y, w, h) { // temizle (arka plan rengiyle doldur)
-      this.ctx.fillStyle = BG;
-      this.ctx.fillRect(x + this.ox, y, w, h);
-      this.ctx.fillStyle = INK;
+    /** renkli dikdörtgen (sonra mürekkebe döner) */
+    F(x, y, w, h, c) { this.col(c); this.R(x, y, w, h); this.col(INK); }
+    /** dama deseniyle gölge */
+    D(x, y, w, h, c = MID, phase = 0) {
+      this.col(c);
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if ((x + i + y + j + phase) % 2 === 0) this.P(x + i, y + j);
+      this.col(INK);
     }
+    C(x, y, w, h) { this.F(x, y, w, h, BG); }
     L(x0, y0, x1, y1) {
       let dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
       let dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
@@ -128,10 +169,10 @@
         if (e2 <= dx) { err += dx; y0 += sy; }
       }
     }
-    /** Yuvarlatılmış köşeli çerçeve; içi arka planla doldurulur */
-    box(x, y, w, h, round = true) {
+    /** Yuvarlatılmış köşeli çerçeve; içi verilen renkle (varsayılan zemin) doldurulur */
+    box(x, y, w, h, round = true, fill = BG) {
       const r = round === true ? 1 : round || 0;
-      this.C(x + (r ? 1 : 0), y + (r ? 1 : 0), w - (r ? 2 : 0), h - (r ? 2 : 0));
+      this.F(x + (r ? 1 : 0), y + (r ? 1 : 0), w - (r ? 2 : 0), h - (r ? 2 : 0), fill);
       this.R(x + r, y, w - 2 * r, 1);
       this.R(x + r, y + h - 1, w - 2 * r, 1);
       this.R(x, y + r, 1, h - 2 * r);
@@ -141,12 +182,15 @@
         this.P(x + 1, y + h - 2); this.P(x + w - 2, y + h - 2);
       }
     }
-    /** Dize tabanlı küçük sprite: '#' mürekkep, 'o' temizle */
+    /** Dize tabanlı küçük sprite: '#' mürekkep, 'm' gölge, 'l' ışık, 'o' zemin */
     S(x, y, rows) {
       rows.forEach((row, j) => {
         for (let i = 0; i < row.length; i++) {
-          if (row[i] === '#') this.P(x + i, y + j);
-          else if (row[i] === 'o') this.C(x + i, y + j, 1, 1);
+          const ch = row[i];
+          if (ch === '#') this.P(x + i, y + j);
+          else if (ch === 'm') this.F(x + i, y + j, 1, 1, MID);
+          else if (ch === 'l') this.F(x + i, y + j, 1, 1, LT);
+          else if (ch === 'o') this.C(x + i, y + j, 1, 1);
         }
       });
     }
@@ -160,15 +204,18 @@
       c.fillStyle = INK;
 
       const tod = this.timeOfDay();
+      this.drawClock();
       this.drawWindow(tod);
       this.drawShelf();
       this.drawArmchair();
+      this.drawCat();
+      this.drawFloorShadow();
       this.drawLamp(tod);
       this.drawChair();
       const pose = this.pose();
       this.drawCharacter(pose);
       this.drawDesk();
-      this.drawMug();
+      if (!pose.mugInHand) this.drawMug();
       this.drawTypewriter(pose);
       this.drawArms(pose);
       this.drawEffects(pose);
@@ -180,31 +227,58 @@
       const now = performance.now();
       const blink = now < this.blinkUntil;
       const f = this.f;
-      const p = { by: 0, eyes: blink ? 'blink' : 'open', dx: 0, dy: 0, arm: 'rest', mouth: false };
+      const p = { by: 0, eyes: blink ? 'blink' : 'open', dx: 0, dy: 0, arm: 'rest', mouth: 'line', brow: null, cheeks: false };
+      // nefes: sakin hâllerde baş ve omuzlar hafifçe iner kalkar
+      if (CALM.includes(this.mood) && this.t % 28 >= 21) p.by = 1;
       switch (this.mood) {
         case 'typing':
-          p.arm = 'type'; p.dx = -1; p.dy = 1;
+          p.arm = 'type'; p.dx = -1; p.dy = 1; p.mouth = 'line';
           break;
-        case 'thinking':
-          p.arm = 'chin'; p.dx = 1; p.dy = -1;
+        case 'thinking': {
+          const scratch = Math.floor(f / 14) % 2 === 1;
+          p.arm = scratch ? 'scratch' : 'chin'; p.dx = 1; p.dy = -1; p.brow = 'think'; p.mouth = 'side';
           break;
+        }
         case 'window':
-          p.dx = 2; p.dy = 0;
+          p.dx = 2; p.dy = -1; p.mouth = 'smile';
+          break;
+        case 'reading':
+          p.dx = 2; p.dy = -2; p.mouth = 'line'; p.by = Math.floor(f / 10) % 6 === 0 ? 1 : p.by;
           break;
         case 'talking':
-          p.mouth = f % 2 === 0;
-          break;
-        case 'happy':
-          p.by = f % 2 === 0 ? -1 : 0; p.eyes = 'happy'; p.arm = 'up';
-          break;
-        case 'sad':
-          p.eyes = blink ? 'blink' : 'sad'; p.dy = 1; p.by = 1;
-          break;
-        case 'sleep':
-          p.eyes = 'closed'; p.by = 1; p.dy = 1;
+          p.mouth = f % 2 === 0 ? 'open' : 'line'; p.arm = 'gesture'; p.cheeks = true;
           break;
         case 'waiting':
+          p.mouth = 'smile'; p.cheeks = true; p.dy = -1;
+          break;
         case 'listening':
+          p.dx = -2; p.dy = 2; p.mouth = 'smile'; p.by = Math.floor(f / 8) % 4 === 0 ? 1 : 0;
+          break;
+        case 'happy':
+          p.by = f % 4 < 2 ? -2 : 0; p.eyes = 'happy'; p.arm = 'up'; p.mouth = 'grin'; p.cheeks = true;
+          break;
+        case 'sad':
+          p.eyes = blink ? 'blink' : 'sad'; p.dy = 1; p.by = 1; p.brow = 'sad'; p.mouth = 'frown';
+          break;
+        case 'sleep':
+          p.eyes = 'closed'; p.by = 2; p.dy = 1; p.mouth = 'none';
+          break;
+        case 'coffee': {
+          // uzan → kaldır → yudumla → bırak (döngü)
+          const ph = f % 26;
+          if (ph < 4) { p.arm = 'reach'; }
+          else if (ph < 8) { p.arm = 'lift'; p.mugInHand = true; p.lift = (ph - 4) / 3; }
+          else if (ph < 18) { p.arm = 'sip'; p.mugInHand = true; p.eyes = 'closed'; p.cheeks = true; p.mouth = 'none'; }
+          else if (ph < 22) { p.arm = 'lift'; p.mugInHand = true; p.lift = 1 - (ph - 18) / 3; }
+          else { p.arm = 'reach'; }
+          break;
+        }
+        case 'stretch': {
+          const ph = f % 22;
+          p.arm = ph < 3 ? 'half' : ph < 17 ? 'stretch' : 'half';
+          p.eyes = 'closed'; p.mouth = ph >= 3 && ph < 15 ? 'yawn' : 'line'; p.by = ph >= 3 && ph < 17 ? -1 : 0;
+          break;
+        }
         default:
           break;
       }
@@ -213,61 +287,94 @@
 
     drawCharacter(p) {
       const hx = HEAD_X, hy = HEAD_Y + p.by;
-      // gövde (hafif kambur sırt)
+      // ---- gövde: çizgili kazak ----
       const top = hy + 12;
       for (let y = top; y <= 76; y++) {
         const back = y < top + 2 ? 95 + (y - top) : y > 70 ? 96 : 97;
         const front = y < top + 2 ? 87 - (y - top) : 86;
         this.C(front + 1, y, back - front - 1, 1);
+        // çizgiler ve sırt gölgesi
+        if (y === top + 7 || y === top + 8 || y === top + 13) this.F(front + 1, y, back - front - 1, 1, MID);
+        else if (y > top + 1) { this.col(MID); if ((y + back) % 2 === 0) this.P(back - 1, y); this.col(INK); }
         this.P(front, y);
         this.P(back, y);
       }
-      // bacaklar (sola, masanın altına)
+      // V yaka
+      this.P(89, top + 1); this.P(90, top + 2); this.P(91, top + 2); this.P(92, top + 1);
+      // ---- bacaklar: kot + ayakkabı ----
       this.C(78, 76, 18, 4);
+      this.D(80, 77, 15, 2, MID);
       this.R(79, 76, 8, 1);
       this.R(79, 79, 17, 1);
       this.R(78, 77, 1, 9);
-      this.R(81, 80, 1, 6);
-      this.R(75, 86, 7, 1);
-      this.R(75, 87, 7, 1);
-      this.R(75, 85, 1, 1);
-      this.R(76, 85, 2, 1);
-      this.C(79, 80, 2, 6);
-      // kafa
+      this.R(81, 80, 1, 5);
+      this.C(79, 80, 2, 5);
+      this.D(79, 80, 2, 5, MID, 1);
+      // ayakkabı
+      this.S(74, 84, [
+        '.#####...',
+        '#mmmmm#..',
+        '########.',
+        '########.',
+      ]);
+      // ---- kafa ----
       this.box(hx, hy, 15, 13, 2);
+      // yüz gölgesi (sağ ve alt kenar)
+      this.D(hx + 12, hy + 3, 1, 7, MID);
+      this.D(hx + 3, hy + 11, 9, 1, MID, 1);
+      // perçem
+      this.P(hx + 6, hy - 1); this.P(hx + 7, hy - 2); this.P(hx + 8, hy - 2); this.P(hx + 9, hy - 1);
       const ex1 = hx + 4 + p.dx, ex2 = hx + 10 + p.dx, ey = hy + 4 + p.dy;
       switch (p.eyes) {
         case 'open':
-          this.R(ex1, ey, 1, 3); this.R(ex2, ey, 1, 3); break;
+          this.R(ex1, ey, 1, 3); this.R(ex2, ey, 1, 3);
+          break;
         case 'blink':
         case 'closed':
-          this.R(ex1 - 1, ey + 2, 2, 1); this.R(ex2, ey + 2, 2, 1); break;
+          this.R(ex1 - 1, ey + 2, 2, 1); this.R(ex2, ey + 2, 2, 1);
+          break;
         case 'happy':
           this.P(ex1 - 1, ey + 2); this.P(ex1, ey + 1); this.P(ex1 + 1, ey + 2);
           this.P(ex2 - 1, ey + 2); this.P(ex2, ey + 1); this.P(ex2 + 1, ey + 2);
           break;
         case 'sad':
           this.R(ex1, ey + 1, 1, 2); this.R(ex2, ey + 1, 1, 2);
-          this.P(ex1 - 1, ey - 1); this.P(ex2 + 1, ey - 1);
           break;
       }
-      if (p.mouth) this.R(hx + 6 + p.dx, hy + 9, 3, 1 + (this.f % 2));
-      if (p.eyes === 'happy') { this.R(hx + 6, hy + 9, 3, 1); this.P(hx + 5, hy + 8); this.P(hx + 9, hy + 8); }
+      // kaşlar
+      if (p.brow === 'think') { this.R(ex1 - 1, ey - 2, 2, 1); this.R(ex2, ey - 3, 2, 1); }
+      if (p.brow === 'sad') { this.P(ex1 - 1, ey - 1); this.P(ex1, ey - 2); this.P(ex2, ey - 2); this.P(ex2 + 1, ey - 1); }
+      // yanaklar
+      if (p.cheeks) { this.F(hx + 2, hy + 8, 2, 1, MID); this.F(hx + 11, hy + 8, 2, 1, MID); }
+      // ağız
+      const mx = hx + 6 + Math.sign(p.dx);
+      switch (p.mouth) {
+        case 'line': this.R(mx + 1, hy + 9, 2, 1); break;
+        case 'smile': this.P(mx, hy + 9); this.R(mx + 1, hy + 10, 2, 1); this.P(mx + 3, hy + 9); break;
+        case 'grin': this.R(mx - 1, hy + 8, 5, 1); this.R(mx, hy + 9, 3, 1); this.F(mx, hy + 9, 3, 1, INK); break;
+        case 'open': this.box(mx, hy + 8, 3, 3, false, MID); break;
+        case 'side': this.R(mx + 2, hy + 9, 2, 1); break;
+        case 'frown': this.R(mx + 1, hy + 9, 2, 1); this.P(mx, hy + 10); this.P(mx + 3, hy + 10); break;
+        case 'yawn': this.box(mx, hy + 7, 4, 4, true, MID); break;
+        default: break;
+      }
     }
 
     drawArms(p) {
       const by = p.by;
       const sx = 88, sy = 60 + by;
+      const f = this.f;
       const thick = (x0, y0, x1, y1) => { this.L(x0, y0, x1, y1); this.L(x0, y0 + 1, x1, y1 + 1); };
+      const hand = (x, y) => this.S(x, y, ['##', '##']);
+      const mugAt = (x, y) => this.S(x, y, ['####.', '#ll##', '#ll#.', '####.']);
       switch (p.arm) {
         case 'type': {
           const a = this.armPhase;
           thick(sx, sy, 84, 65);
           thick(84, 65, 71, 64 - a);
-          this.R(69, 63 - a, 2, 2);
-          // arka el
+          hand(69, 63 - a);
           this.L(84, 66, 75, 66 - (1 - a));
-          this.R(73, 65 - (1 - a), 2, 2);
+          hand(73, 65 - (1 - a));
           break;
         }
         case 'chin':
@@ -275,16 +382,67 @@
           thick(84, 66, 87, 58 + by);
           this.R(86, 56 + by, 3, 2);
           break;
+        case 'scratch': {
+          const w = f % 2;
+          thick(sx, sy, 83, 55 + by);
+          thick(83, 55 + by, 85 + w, HEAD_Y - 1 + by);
+          hand(85 + w, HEAD_Y - 2 + by);
+          // hareket çizgileri
+          this.P(82, HEAD_Y - 3 + by); this.P(81, HEAD_Y - 4 + by);
+          break;
+        }
+        case 'gesture': {
+          const w = Math.floor(f / 2) % 2;
+          thick(sx, sy, 83, 64);
+          thick(83, 64, 79, 58 - w);
+          hand(77, 56 - w);
+          break;
+        }
         case 'up':
           thick(sx, sy, 82, 53 + by);
           this.R(80, 50 + by, 2, 3);
           this.L(95, sy, 100, 53 + by);
           this.R(100, 50 + by, 2, 3);
           break;
+        case 'half':
+          thick(sx, sy, 83, 56 + by);
+          hand(81, 54 + by);
+          this.L(95, sy, 99, 56 + by);
+          hand(99, 54 + by);
+          break;
+        case 'stretch': {
+          const w = Math.floor(f / 3) % 2;
+          thick(sx, sy, 82, 48 + by);
+          hand(81 - w, 45 + by);
+          this.L(95, sy, 101, 48 + by);
+          this.L(95, sy + 1, 101, 49 + by);
+          hand(101 + w, 45 + by);
+          break;
+        }
+        case 'reach':
+          thick(sx, sy, 80, 66);
+          thick(80, 66, 52, 66);
+          hand(50, 66);
+          break;
+        case 'lift': {
+          const k = p.lift || 0;
+          const hx = Math.round(52 + (80 - 52) * k), hy = Math.round(66 - 10 * k);
+          thick(sx, sy, 82, 64);
+          thick(82, 64, hx + 2, hy + 1);
+          mugAt(hx - 3, hy - 1);
+          break;
+        }
+        case 'sip':
+          thick(sx, sy, 84, 64);
+          thick(84, 64, 82, 57 + by);
+          mugAt(78, 53 + by);
+          // buhar
+          if (f % 4 < 2) { this.F(79, 50 + by - (f % 2), 1, 1, MID); this.F(81, 49 + by, 1, 1, MID); }
+          break;
         default: // rest: kol masaya dayalı
           thick(sx, sy, 85, 68);
           thick(85, 68, 76, 69);
-          this.R(74, 68, 2, 2);
+          hand(74, 68);
       }
     }
 
@@ -302,12 +460,15 @@
           this.R(x, y, s, 1); this.R(x, y + s - 1, s, 1);
           for (let j = 1; j < s - 1; j++) this.P(x + s - 1 - j, y + j);
         });
+        // burun baloncuğu
+        const r = [1, 2, 3, 3, 2, 1][Math.floor(f / 2) % 6];
+        this.box(hx - 1 - r, hy + 7, r + 2, r + 2, r > 1, LT);
       }
       if (this.mood === 'thinking') {
         const n = Math.floor(f / 4) % 4;
         if (n >= 1) this.R(hx + 15, hy - 2, 2, 2);
         if (n >= 2) this.box(hx + 18, hy - 7, 3, 3, false);
-        if (n >= 3) { this.box(hx + 22, hy - 15, 9, 6); this.P(hx + 24, hy - 12); this.P(hx + 26, hy - 12); this.P(hx + 28, hy - 12); }
+        if (n >= 3) { this.box(hx + 22, hy - 15, 9, 6, true, LT); this.P(hx + 24, hy - 12); this.P(hx + 26, hy - 12); this.P(hx + 28, hy - 12); }
       }
       if (this.mood === 'happy') {
         const sp = [[hx - 6, hy - 2], [hx + 18, hy - 4], [hx + 20, hy + 6]];
@@ -320,14 +481,40 @@
       if (this.mood === 'sad') {
         const y = hy + 1 + (f % 6 > 2 ? 1 : 0);
         this.P(hx + 15, y); this.R(hx + 14, y + 1, 3, 2); this.P(hx + 15, y + 3);
+        // küçük yağmur bulutu
+        const cy = hy - 13;
+        this.S(hx + 1, cy, [
+          '...####......',
+          '.##mmmm##.##.',
+          '#mmmmmmmm#mm#',
+          '#mmmmmmmmmmm#',
+          '.###########.',
+        ]);
+        for (let i = 0; i < 4; i++) {
+          const dx = hx + 3 + i * 3, dy = cy + 6 + ((f + i * 2) % 5);
+          if (dy < hy - 1) this.P(dx, dy);
+        }
       }
+      if (this.mood === 'stretch' && p.mouth === 'yawn') {
+        this.P(hx - 3, hy + 3); this.P(hx - 4, hy + 2); this.P(hx + 17, hy + 3); this.P(hx + 18, hy + 2);
+      }
+      // konfeti
+      this.parts.forEach((q) => { this.col(q.c); this.P(Math.round(q.x), Math.round(q.y)); if (q.life % 2) this.P(Math.round(q.x) + 1, Math.round(q.y)); });
+      this.col(INK);
+    }
+
+    drawFloorShadow() {
+      this.D(42, 87, 64, 1, MID);
+      this.D(156, 87, 36, 1, MID, 1);
     }
 
     drawChair() {
       this.R(99, 58, 1, 30);
       this.R(101, 60, 1, 18);
       this.R(100, 58, 1, 1);
+      this.F(100, 59, 1, 18, MID);
       this.R(85, 77, 16, 1);
+      this.F(86, 78, 14, 2, MID);
       this.R(86, 80, 15, 1);
       this.R(88, 81, 1, 7);
       this.R(101, 78, 1, 10);
@@ -335,20 +522,25 @@
 
     drawDesk() {
       this.box(42, 71, 36, 3, false);
+      this.F(43, 72, 34, 1, MID);
       this.box(44, 74, 3, 14, false);
       this.box(73, 74, 3, 14, false);
-      this.R(47, 82, 26, 1);
+      // çekmece
+      this.box(52, 74, 16, 5, false);
+      this.R(59, 76, 2, 1);
+      this.R(47, 83, 26, 1);
     }
 
     drawMug() {
       // kahve kupası + buhar
-      this.box(45, 65, 5, 6, false);
+      this.box(45, 65, 5, 6, false, LT);
+      this.F(46, 66, 3, 1, MID);
       this.R(50, 66, 1, 1); this.R(51, 67, 1, 2); this.R(50, 69, 1, 1);
-      const f = this.f;
+      const f = this.t;
       if (this.mood !== 'sleep') {
         const s = f % 6;
-        this.P(46 + (s > 2 ? 1 : 0), 62 - (s % 3));
-        this.P(48 - (s > 2 ? 1 : 0), 60 - (s % 3));
+        this.F(46 + (s > 2 ? 1 : 0), 62 - (s % 3), 1, 1, MID);
+        this.F(48 - (s > 2 ? 1 : 0), 60 - (s % 3), 1, 1, MID);
       }
     }
 
@@ -359,19 +551,42 @@
       this.R(53, 69, 19, 2);
       this.R(54, 67, 17, 2);
       this.R(56, 66, 13, 1);
-      // tuşlar
+      this.F(55, 69, 15, 1, MID);
+      // tuşlar (basılan tuş parlar)
       this.C(56, 68, 13, 1);
-      for (let x = 56; x < 69; x += 2) this.P(x, 68);
+      for (let i = 0; i < 7; i++) {
+        if (i === this.key) this.F(56 + i * 2, 68, 1, 1, LT);
+        else this.P(56 + i * 2, 68);
+      }
       // silindir + kağıt
       const px = 57 + shift;
-      this.box(px - 2, 63, 15, 3, false);
+      this.box(px - 2, 63, 15, 3, false, MID);
       this.P(px - 3, 64); this.P(px + 13, 64);
-      this.box(px, 53, 11, 11, false);
+      this.box(px, 53, 11, 11, false, LT);
       this.C(px + 1, 63, 9, 1);
       this.R(px, 63, 1, 1); this.R(px + 10, 63, 1, 1);
       this.lines.forEach((len, i) => { if (len) this.R(px + 2, 55 + i * 2, len, 1); });
       // kağıdın kıvrık ucu
       this.P(px + 10, 52); this.P(px + 11, 51);
+      // satır sonu zili
+      if (this.ding > 0) {
+        const s = 5 - this.ding;
+        this.P(74, 60 - s); this.P(76, 61 - s); this.P(75, 58 - s); this.P(73, 62 - s);
+      }
+    }
+
+    drawClock() {
+      // gerçek saati gösteren duvar saati
+      const cx = 60, cy = 27, r = 6;
+      for (let a = 0; a < Math.PI * 2; a += 0.05) this.P(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r));
+      for (let y = -r + 1; y < r; y++) for (let x = -r + 1; x < r; x++) if (x * x + y * y < (r - 0.8) * (r - 0.8)) this.F(cx + x, cy + y, 1, 1, LT);
+      [0, 3, 6, 9].forEach((h) => { const a = (h / 12) * Math.PI * 2 - Math.PI / 2; this.F(Math.round(cx + Math.cos(a) * (r - 2)), Math.round(cy + Math.sin(a) * (r - 2)), 1, 1, MID); });
+      const d = new Date();
+      const ma = (d.getMinutes() / 60) * Math.PI * 2 - Math.PI / 2;
+      const ha = ((d.getHours() % 12 + d.getMinutes() / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+      this.L(cx, cy, Math.round(cx + Math.cos(ma) * (r - 2)), Math.round(cy + Math.sin(ma) * (r - 2)));
+      this.L(cx, cy, Math.round(cx + Math.cos(ha) * (r - 3)), Math.round(cy + Math.sin(ha) * (r - 3)));
+      this.R(cx, cy - r - 2, 1, 2);
     }
 
     drawLamp(tod) {
@@ -379,6 +594,7 @@
       this.R(26, 87, 11, 1);
       this.R(27, 86, 9, 1);
       this.R(29, 85, 5, 1);
+      this.F(30, 86, 3, 1, MID);
       // gövde
       this.L(31, 85, 30, 78);
       this.L(30, 78, 29, 70);
@@ -387,22 +603,26 @@
       // abajur
       this.S(31, 47, [
         '..##......',
-        '.#oo##....',
-        '#oooo##...',
-        '#oooooo#..',
-        '.#ooooo##.',
-        '..#ooo####',
-        '...#o####.',
+        '.#mm##....',
+        '#mmmm##...',
+        '#mmmmmm#..',
+        '.#mmmmm##.',
+        '..#mmm####',
+        '...#m####.',
         '....###...',
       ]);
       if (tod !== 'day') {
-        // ışık (seyrek desen)
-        for (let y = 59; y < 71; y++) {
-          for (let x = 38; x < 60; x++) {
-            const inside = (x - 38) > (y - 59) * 0.4 && (x - 41) < (y - 58) * 1.4;
-            if (inside && (x + y * 3) % 7 === 0 && y % 2 === 0) this.P(x, y);
+        // ışık konisi (hafifçe titrer)
+        const flick = this.t % 37 === 0 ? 1 : 0;
+        this.col(LT);
+        for (let y = 56; y < 71; y++) {
+          for (let x = 37; x < 62; x++) {
+            const inside = (x - 38) > (y - 59) * 0.4 && (x - 41) < (y - 56) * 1.5;
+            if (inside && BAYER[y & 3][x & 3] < 4 - flick) this.P(x, y);
           }
         }
+        this.col(INK);
+        this.F(39, 56, 2, 1, LT);
       }
     }
 
@@ -428,18 +648,32 @@
           if (BAYER[y & 3][x & 3] / 16 < d) this.P(x, y);
         }
       }
+      const tt = this.t;
       if (tod === 'night') {
-        // ay ve yıldızlar
-        this.C(132, 34, 4, 4); this.C(131, 35, 6, 2);
-        [[122, 40], [127, 36], [137, 44], [124, 47]].forEach(([x, y]) => this.C(x, y, 1, 1));
-      } else if (tod === 'day') {
-        this.box(131, 36, 5, 5);
+        // ay ve parlayıp sönen yıldızlar
+        this.F(132, 34, 4, 4, LT); this.F(131, 35, 6, 2, LT); this.F(134, 35, 1, 1, MID);
+        [[122, 40], [127, 36], [137, 44], [124, 47], [139, 38]].forEach(([x, y], i) => { if ((tt + i * 5) % 14 < 10) this.F(x, y, 1, 1, LT); });
+      } else {
+        // güneş ve kayan bulutlar
+        if (tod === 'day') this.box(131, 36, 5, 5, true, LT);
+        const cloud = (bx, by) => {
+          [[0, 1, 7], [1, 0, 4], [2, 2, 3]].forEach(([dx, dy, w]) => {
+            for (let i = 0; i < w; i++) { const x = bx + dx + i, y = by + dy; if (inside(x, y)) this.F(x, y, 1, 1, LT); }
+          });
+        };
+        cloud(x0 + ((Math.floor(tt / 9)) % 34) - 8, 38);
+        cloud(x0 + ((Math.floor(tt / 13) + 17) % 34) - 8, 45);
+        if (this.bird) {
+          const b = this.bird, w = tt % 4 < 2;
+          [[0, w ? 0 : 1], [1, 1], [2, w ? 0 : 1]].forEach(([dx, dy]) => { if (inside(b.x + dx, b.y + dy)) this.P(b.x + dx, b.y + dy); });
+        }
       }
       // ağaçlar ve tepe
       const tree = (x, y, h) => {
         for (let i = 0; i < h; i++) {
           const w = Math.floor(i / 2) + 1;
           this.R(x - w + 1, y + i, w * 2 - 1, 1);
+          if (i > 2 && i % 2 === 0) this.F(x - w + 2, y + i, 1, 1, MID);
         }
         this.R(x, y + h, 1, 2);
       };
@@ -449,7 +683,7 @@
         const hh = 60 + Math.round(Math.sin((x - x0) / 5) * 1.2);
         for (let y = hh; y < bottom; y++) this.P(x, y);
       }
-      // çerçeve
+      // çerçeve, orta kayıt ve pervaz
       for (let a = Math.PI; a <= 2 * Math.PI + 0.001; a += 0.02) {
         this.P(Math.round(cx + Math.cos(a) * r), Math.round(cy + Math.sin(a) * r));
       }
@@ -457,6 +691,9 @@
       this.R(x1, cy, 1, bottom - cy);
       this.R(x0, bottom, x1 - x0 + 1, 1);
       this.R(x0 - 2, bottom + 1, x1 - x0 + 5, 1);
+      this.F(x0 - 1, bottom + 2, x1 - x0 + 3, 1, MID);
+      // cama vuran ışık
+      if (tod !== 'night') { this.F(x0 + 3, cy + 2, 1, 3, LT); this.F(x0 + 4, cy + 1, 1, 1, LT); }
     }
 
     drawShelf() {
@@ -477,9 +714,8 @@
           const ty = floor - bh;
           if (type === 1) this.R(bx, ty, bw, bh);
           else if (type === 2) { this.R(bx, floor - 2, bw + 3, 2); this.R(bx, floor - 4, bw + 2, 1); }
-          else if (type === 3) {
-            for (let yy = ty; yy < floor; yy++) for (let xx = bx; xx < bx + bw; xx++) if ((xx + yy) % 2 === 0) this.P(xx, yy);
-          } else this.box(bx, ty, bw + 1, bh, false);
+          else if (type === 3) this.D(bx, ty, bw, bh, INK);
+          else { this.box(bx, ty, bw + 1, bh, false, MID); this.F(bx + 1, ty + 2, bw - 1, 1, LT); }
           bx += bw + 1;
         });
       });
@@ -487,23 +723,53 @@
       this.R(x + w / 2, 71, 1, 16);
       this.R(x + w / 2 - 3, 78, 2, 1);
       this.R(x + w / 2 + 2, 78, 2, 1);
+      this.D(x + 1, 71, w / 2 - 1, 16, MID, 1);
+      // üstte saksı bitkisi (hafifçe sallanır)
+      const sway = Math.floor(this.t / 12) % 2;
+      this.S(x + 4, y - 10, [
+        sway ? '..#.#...' : '.#..#...',
+        sway ? '.#m#m#..' : '#m##m#..',
+        '..#m#.#.',
+        '#..#.#m#',
+        '.#.##.#.',
+        '..####..',
+        '.#mmmm#.',
+        '.#mmmm#.',
+        '..####..',
+      ]);
     }
 
     drawArmchair() {
       // sırt
-      this.box(176, 62, 14, 26);
+      this.box(176, 62, 14, 26, true, BG);
+      this.D(186, 64, 3, 22, MID);
       // oturak
       this.box(160, 74, 26, 7);
+      this.F(161, 75, 24, 1, MID);
       // kolçak
       this.box(156, 70, 8, 12);
       this.R(158, 72, 4, 1);
       // ön panel
-      this.box(158, 80, 30, 6, false);
+      this.box(158, 80, 30, 6, false, MID);
       // ayaklar
       this.R(160, 86, 2, 2);
       this.R(184, 86, 2, 2);
-      // yastık
-      this.box(167, 70, 10, 5);
+    }
+
+    drawCat() {
+      // koltukta kıvrılmış uyuyan kedi; kuyruğu ara ara sallanır
+      const tail = this.catTail > 0 ? (this.catTail % 4 < 2 ? 0 : 1) : 0;
+      this.S(163, 67, [
+        '.#.#.........',
+        '#m#m#####....',
+        '#mmmmmmmm##..',
+        '#m#m#mmmmmm#.',
+        '.#mmmmmmmmmm#',
+        '..##########.',
+      ]);
+      if (tail) this.S(175, 66, ['.#', '#.', '#.']);
+      else this.S(175, 70, ['##', '.#']);
+      if (this.mood === 'sleep' || this.t % 60 < 30) this.F(165, 69, 1, 1, INK); // kapalı göz çizgisi
     }
   }
 
