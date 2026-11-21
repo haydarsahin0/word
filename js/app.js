@@ -18,9 +18,10 @@
   /** Zorluk: düşük kolaylık + yakın zamandaki hatalar (pratik seçiminde öne alınır) */
   const difficulty = (w) => (EASE_MAX - (w.ease || EASE0)) + (w.recentErr || 0) * 0.7;
   // aynı kelime bu süre içinde tekrar gösterilmez (az kelimede kısa, çok kelimede uzun)
-  const cooldownMs = () => { const n = state.words.length; return n <= 3 ? 25 * 1000 : n <= 10 ? 45 * 1000 : 90 * 1000; };
+  const cooldownMs = () => { const n = state.words.length; return n <= 3 ? 8 * 1000 : n <= 10 ? 20 * 1000 : 45 * 1000; };
   const IDLE_MS = 8 * MIN; // bu kadar dokunulmazsa kanka uyur, model çağrılmaz
-  const GAPS = { often: 6 * 1000, normal: 12 * 1000, rare: 30 * 1000 };
+  // sorular arası boşluk: neredeyse hiç ara vermeden art arda
+  const GAPS = { often: 800, normal: 1500, rare: 6 * 1000 };
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -461,7 +462,8 @@
   /* ---------- balon ---------- */
   let bubbleTimer = 0;
   let bubbleKind = null;
-  let nextReviewAt = Date.now() + 20 * 1000;
+  let nextReviewAt = Date.now() + 4000;
+  let nextTimer = 0;
   let busy = false;
   let moodUntil = 0;
 
@@ -487,6 +489,8 @@
     bubble.hidden = true;
     bubbleKind = null;
     nextReviewAt = Date.now() + GAPS[state.settings.freq];
+    clearTimeout(nextTimer);
+    nextTimer = setTimeout(() => { if (typeof tickTalk === 'function') tickTalk(); }, GAPS[state.settings.freq] + 30);
     if (!state.paused) setMood('typing', 4000);
     updateTitle();
   }
@@ -976,11 +980,11 @@
         <div class="b-mean">${esc(w.tr)}</div>
         ${note ? `<div class="b-hint">${note}</div>` : ''}
         ${q === 3 && !note ? '<div class="b-hint">richtig – aber noch etwas langsam, wir üben das öfter</div>' : ''}
-        <div class="b-hint">${advanced ? `nächste Wiederholung ${nextTxt}` : `Extra-Übung ✓ · Wiederholung ${nextTxt}`}</div>`, 'feedback', { autoClose: note ? 5000 : 3200 });
+        <div class="b-hint">${advanced ? `nächste Wiederholung ${nextTxt}` : `Extra-Übung ✓ · Wiederholung ${nextTxt}`}</div>`, 'feedback', { autoClose: note ? 3000 : 1600 });
     } else {
       setMood('sad', 2500);
       showBubble(`${wordCard(w, 'kein Problem – so ist es richtig, ich frage dich wieder', { ex: shownEx })}
-        <div class="b-actions"><button class="btn sm solid" data-act="close">ok</button></div>`, 'feedback', { autoClose: 20000, focus: false });
+        <div class="b-actions"><button class="btn sm solid" data-act="close">ok</button></div>`, 'feedback', { autoClose: 6000, focus: false });
     }
     if (state.settings.voice === 'on') say(fullDe(w));
     current = null;
@@ -1125,7 +1129,7 @@
     if (due.length) return startReview(due[0]);
     // 2) arada modelden yeni kelime önerisi ya da kısa bir sohbet satırı
     aiQueue = aiQueue.filter((it) => (it.type === 'new' || it.type === 'chat') && Date.now() - (it._t || 0) < 20 * MIN);
-    if (aiQueue.length && (Math.random() < 0.25 || state.words.length < 3)) {
+    if (aiQueue.length && (Math.random() < 0.12 || state.words.length < 3)) {
       const it = aiQueue.shift();
       if (showAiItem(it)) return;
     }
@@ -1136,6 +1140,9 @@
       const w = pick([...rested].sort((a, b) => pscore(a) - pscore(b) || a.seenAt - b.seenAt).slice(0, 4));
       return startReview(w);
     }
+    // hepsi yeni görüldüyse bile boş bekleme: en uzun süredir görülmeyeni sor (aynı kelime üst üste değil)
+    const others = state.words.filter((w) => w.id !== lastWordId || state.words.length === 1);
+    if (others.length) return startReview([...others].sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0))[0]);
     if (state.words.length < 5) aiNextFetch = Math.min(aiNextFetch, Date.now() + 3000);
     nextReviewAt = Date.now() + 5000;
     idleThought();
@@ -1157,7 +1164,7 @@
   function showAiItem(it) {
     const s = (v) => (typeof v === 'string' ? v.trim() : '');
     if (seen(it.de) || seen(it.q_de) || seen(it.text_de)) return false;
-    if (it.type === 'chat' && s(it.text_de)) { markShown(it.text_de); think(s(it.text_de), 6000); nextReviewAt = Date.now() + 6000; return true; }
+    if (it.type === 'chat' && s(it.text_de)) { markShown(it.text_de); think(s(it.text_de), 3500); nextReviewAt = Date.now() + 2500; return true; }
     if (it.type === 'new') return suggestNew(it);
     return false; // örnek / boşluk / soru / ipucu türleri kaldırıldı: soru sadece resimli ya da Türkçe → Almanca
   }
@@ -1175,7 +1182,7 @@
     };
     setMood('talking', 1500);
     showBubble(`${wordCard(pendingNew, pick(['Ich habe ein neues Wort für dich', 'Das solltest du kennen', 'Hier, ein neues Wort']))}
-      <div class="b-actions"><button class="btn sm solid" data-act="addnew">ins Heft</button><button class="btn sm" data-act="skip">weiter</button></div>`, 'chat', { autoClose: 30000 });
+      <div class="b-actions"><button class="btn sm solid" data-act="addnew">ins Heft</button><button class="btn sm" data-act="skip">weiter</button></div>`, 'chat', { autoClose: 12000 });
     return true;
   }
 
@@ -1496,6 +1503,15 @@
   canvas.addEventListener('click', () => { sfx('boop'); if (!bubbleKind) askNow(); });
 
   /* ---------- sürekli döngü ---------- */
+  /** Balon kapanınca sıradaki soruyu hemen getir (1 sn'lik döngüyü beklemeden) */
+  function tickTalk() {
+    const now = Date.now();
+    if (state.paused || !isActive() || busy || bubbleKind) return;
+    const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
+    if (typingNow || now < readerQuietUntil || now < nextReviewAt) return;
+    nextTalk();
+  }
+
   setInterval(() => {
     const now = Date.now();
     if (state.paused) { scene.setMood('sleep'); return; }
@@ -1538,7 +1554,7 @@
     hideThought();
     setMood('happy', 1500);
     think(pick([`Da bist du ja${nameTag(', ')}! Weiter geht’s`, `Hallo${nameTag(' ')}! Ich habe auf dich gewartet`, 'Ich bin wach – los geht’s']), 4000);
-    nextReviewAt = Math.max(nextReviewAt, Date.now() + 6000);
+    nextReviewAt = Math.max(nextReviewAt, Date.now() + 2000);
   }
 
   function updateTitle() {
@@ -1749,5 +1765,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow() };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, words: state.words.length, mood: scene.mood, thought: thought.hidden ? '' : thought.textContent, dormant }) };
 })();
