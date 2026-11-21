@@ -795,20 +795,12 @@
     return state.words.filter((w) => w.due <= now).sort((a, b) => a.due - b.due);
   }
 
-  /** Soru türü seçimi: resimli soru ve Türkçeden Almancaya en sık; diğerleri arada */
-  function pickMode(w, hasSentence) {
-    const weights = {
-      picture: w.img ? 5 : 0,          // "Was ist das?" — görsel
-      tr2de: w.tr ? 4 : 0,             // Türkçesini gör, Almancasını yaz
-      recall: w.level <= 1 ? 2 : 1,    // Almancasını gör, hatırla
-      cloze: hasSentence ? 1.5 : 0,    // boşluk doldurma
-      reverse: w.explain_de ? 1 : 0,   // Almanca açıklamadan bul
-    };
-    if (weights[w.lastMode]) weights[w.lastMode] *= 0.2; // aynı tür üst üste gelmesin
-    const entries = Object.entries(weights).filter(([, v]) => v > 0);
-    let r = Math.random() * entries.reduce((a, [, v]) => a + v, 0);
-    for (const [m, v] of entries) { r -= v; if (r <= 0) return m; }
-    return entries.length ? entries[0][0] : 'recall';
+  /** Sadece iki soru türü: resimli ("Was ist das?") ve Türkçe → Almanca */
+  function pickMode(w) {
+    if (!w.img) return 'tr2de';
+    if (w.lastMode === 'picture') return Math.random() < 0.75 ? 'tr2de' : 'picture';
+    if (w.lastMode === 'tr2de') return Math.random() < 0.75 ? 'picture' : 'tr2de';
+    return Math.random() < 0.55 ? 'picture' : 'tr2de';
   }
 
   const REVIEW_OPTS = { autoClose: 120000, onTimeout: () => postpone() };
@@ -822,8 +814,8 @@
     if (!w) return;
     const hasSentence = freshSentences(w) > 0;
     mode = mode || pickMode(w, hasSentence);
+    if (mode !== 'picture' && mode !== 'tr2de') mode = pickMode(w); // diğer türler kaldırıldı
     if (mode === 'picture' && !w.img) mode = 'tr2de';
-    if (mode === 'reverse' && !w.explain_de) mode = 'tr2de';
     const ex = mode === 'reverse' || mode === 'picture' || mode === 'tr2de' ? null : nextSentence(w, true);
     const exW = ex && wordIn(ex.de, w);
     if (mode === 'cloze' && !exW) mode = 'reverse';
@@ -1105,14 +1097,14 @@
 
   async function refillQueue() {
     if (window.AI && !AI.available()) return growPoolOffline();
-    if (!window.AI || !AI.available() || aiFetching || state.paused || aiQueue.length >= 4 || Date.now() < aiNextFetch) return;
+    if (!window.AI || !AI.available() || aiFetching || state.paused || aiQueue.length >= 2 || Date.now() < aiNextFetch) return;
     aiFetching = true;
-    aiNextFetch = Date.now() + 12 * 1000;
+    aiNextFetch = Date.now() + 2 * MIN; // sadece yeni kelime önerisi ve sohbet için: seyrek
     try {
       const n = state.words.length;
       const wantNew = n < 3 || (n < 15 ? Math.random() < 0.3 : Math.random() < 0.12);
       const known = [...state.words.map((w) => w.de), ...(state.skipped || [])].slice(-150);
-      const items = await AI.talk(focusWords(), known, wantNew, 5);
+      const items = (await AI.talk(focusWords(), known, true, 2, true)).filter((it) => it.type === 'new' || it.type === 'chat');
       items.forEach((it) => { it._t = Date.now(); });
       // daha önce gösterilenleri ele, aynı kelimeyi arka arkaya koyma
       items.filter((it) => !seen(it.de) && !seen(it.q_de) && !seen(it.text_de) && !aiQueue.some((q) => sentKey(q.de || q.q_de || q.text_de) === sentKey(it.de || it.q_de || it.text_de)))
@@ -1128,49 +1120,22 @@
   }
 
   function nextTalk() {
+    // 1) zamanı gelen kelime (aralıklı tekrar)
     const due = dueWords().filter((w) => !cooling(w));
-    // 1) Zamanı gelen kelimeler öncelikli (aralıklı tekrar)
-    if (due.length && (Math.random() < 0.65 || !aiQueue.length)) {
-      const w0 = due[0];
-      // çoğunlukla resimli ya da Türkçe→Almanca soru; arada modelin hazırladığı cümleler
-      const ai = Math.random() < 0.3 ? aiQueue.findIndex((it) => ['cloze', 'ask', 'example'].includes(it.type) && it.id === w0.id) : -1;
-      if (ai >= 0 && showAiItem(aiQueue.splice(ai, 1)[0])) return;
-      if (!freshSentences(w0)) aiNextFetch = 0;
-      return startReview(w0);
-    }
-    // 2) yarı yarıya: dinlenmiş bir kelimeyi resimli / Türkçe→Almanca sor (ekstra pratik)
-    const restedNow = state.words.filter((w) => !cooling(w) && (w.img || w.tr));
-    if (restedNow.length && Math.random() < 0.5) {
-      const pscore = (x) => seenTodayOf(x) + x.level * 3 - difficulty(x) * 4;
-      const w = pick([...restedNow].sort((a, b) => pscore(a) - pscore(b)).slice(0, 4));
-      return startReview(w, w.img && Math.random() < 0.55 ? 'picture' : 'tr2de');
-    }
-    // 3) Modelin hazırladıkları — kelimesi "dinlenen" maddeler sırada bekler
-    aiQueue = aiQueue.filter((it) => Date.now() - (it._t || 0) < 20 * MIN);
-    for (let i = 0; i < aiQueue.length; i++) {
-      const it = aiQueue[i];
-      if (it.type !== 'new' && it.type !== 'chat') {
-        const w = wordById(it);
-        if (w && cooling(w)) continue;
-      }
-      aiQueue.splice(i, 1);
-      i--;
+    if (due.length) return startReview(due[0]);
+    // 2) arada modelden yeni kelime önerisi ya da kısa bir sohbet satırı
+    aiQueue = aiQueue.filter((it) => (it.type === 'new' || it.type === 'chat') && Date.now() - (it._t || 0) < 20 * MIN);
+    if (aiQueue.length && (Math.random() < 0.25 || state.words.length < 3)) {
+      const it = aiQueue.shift();
       if (showAiItem(it)) return;
     }
-    // 3) Yerel yedek: dinlenmeyen bir kelimeyi örnek cümlesiyle hatırlat
+    // 3) ekstra pratik: dinlenmiş bir kelimeyi resimli ya da Türkçe → Almanca sor
     const rested = state.words.filter((w) => !cooling(w));
-    if (rested.length && Math.random() < 0.85) {
-      // en az görülen ve en düşük seviyeli kelimeler daha sık gelir
-      // az görülen, düşük seviyeli ve zor kelimeler daha sık gelir
+    if (rested.length) {
       const pscore = (x) => seenTodayOf(x) + x.level * 3 - difficulty(x) * 4;
       const w = pick([...rested].sort((a, b) => pscore(a) - pscore(b) || a.seenAt - b.seenAt).slice(0, 4));
-      if (freshSentences(w) && Math.random() < 0.4) {
-        const ex = nextSentence(w, true);
-        return showExample(w, ex.de, ex.tr, '', true);
-      }
       return startReview(w);
     }
-    // 4) Kelime azsa aynılarını döndürme: modelden yeni kelime iste, bu arada kanka çalışsın
     if (state.words.length < 5) aiNextFetch = Math.min(aiNextFetch, Date.now() + 3000);
     nextReviewAt = Date.now() + 5000;
     idleThought();
@@ -1194,54 +1159,7 @@
     if (seen(it.de) || seen(it.q_de) || seen(it.text_de)) return false;
     if (it.type === 'chat' && s(it.text_de)) { markShown(it.text_de); think(s(it.text_de), 6000); nextReviewAt = Date.now() + 6000; return true; }
     if (it.type === 'new') return suggestNew(it);
-    const w = wordById(it);
-    if (!w) return false;
-    if (it.type === 'example' && s(it.de)) return showExample(w, s(it.de), s(it.tr), s(it.note_de));
-    if (it.type === 'cloze' && s(it.de).includes('___') && s(it.answer)) {
-      const full = s(it.de).replace('___', s(it.answer));
-      if (seen(full)) return false;
-      markShown(s(it.de)); markShown(full);
-      addToPool(w, full, s(it.tr));
-      save();
-      w.lastMode = 'cloze';
-      touch(w);
-      current = { w, mode: 'cloze', answer: s(it.answer), ex: { de: full, tr: s(it.tr) }, started: Date.now() };
-      setMood('talking', 1200);
-      const parts = s(it.de).split('___').map(esc);
-      showBubble(`<div class="b-tag">${pick(['Was passt in die Lücke?', 'Ergänze den Satz!', 'Na, welches Wort fehlt?'])}</div>
-        <div class="b-ex" style="border:0;margin:0;padding:0">„${parts.join('<span class="gap">&nbsp;</span>')}“</div>
-        <div class="b-hint">Tipp: ${esc(w.explain_de ? maskWord(w.explain_de, w) : w.tr)}${w.explain_de ? `<span class="tr"> · ${esc(w.tr)}</span>` : ''}${s(it.tr) ? `<span class="tr"><i>${esc(s(it.tr))}</i></span>` : ''}</div>
-        <form class="b-form" data-form="answer"><input name="a" placeholder="welches Wort?" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
-        <div class="b-actions"><button class="btn sm" data-act="giveup">weiß nicht</button><button class="btn sm" data-act="later">später</button></div>`, 'review', REVIEW_OPTS);
-      return true;
-    }
-    if (it.type === 'ask' && s(it.q_de)) {
-      askCtx = { w, q: s(it.q_de) };
-      touch(w);
-      markShown(s(it.q_de));
-      w.asked = [...(w.asked || []), s(it.q_de)].slice(-10);
-      save();
-      setMood('talking', 1400);
-      showBubble(`<div class="b-tag">${pick(['Eine Frage an dich', 'Lass uns kurz reden', 'Erzähl mal'])}</div>
-        <div class="b-big" style="font-size:20px">${esc(s(it.q_de))} <button class="btn speak" data-act="say-ex" data-text="${esc(s(it.q_de))}" aria-label="Sesli oku">${speakerSvg}</button></div>
-        ${s(it.q_tr) ? `<div class="b-hint tr">${esc(s(it.q_tr))}</div>` : ''}
-        <div class="b-hint">Versuch, „${esc(fullDe(w))}“ zu benutzen</div>
-        <form class="b-form" data-form="ask"><input name="a" placeholder="auf Deutsch antworten…" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn sm solid" type="submit">✓</button></form>
-        <div class="b-actions"><button class="btn sm" data-act="close">weiter</button></div>`, 'review', { autoClose: 120000 });
-      return true;
-    }
-    if (it.type === 'tip' && s(it.text_de)) {
-      markShown(s(it.text_de));
-      touch(w);
-      if (s(it.de) && wordIn(s(it.de), w)) addToPool(w, s(it.de), '');
-      setMood('talking', 1400);
-      showBubble(`<div class="b-tag">kleiner Tipp · ${esc(fullDe(w))}</div>
-        <div>${esc(s(it.text_de))}</div>
-        ${s(it.de) ? `<div class="b-ex">„${highlight(s(it.de), w.de) || esc(s(it.de))}“</div>` : ''}
-        <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'chat', { autoClose: 16000 });
-      return true;
-    }
-    return false;
+    return false; // örnek / boşluk / soru / ipucu türleri kaldırıldı: soru sadece resimli ya da Türkçe → Almanca
   }
 
   function suggestNew(it) {

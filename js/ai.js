@@ -67,8 +67,8 @@
     };
   }
 
-  async function talk(words, known, wantNew, n = 3) {
-    const j = await call('talk', { words, known, wantNew, n, interests: profileProvider().interests || [] }, 35000);
+  async function talk(words, known, wantNew, n = 3, onlyNew = false) {
+    const j = await call('talk', { words, known, wantNew, n, onlyNew, interests: profileProvider().interests || [] }, 35000);
     return Array.isArray(j.items) ? j.items.filter((it) => it && typeof it.type === 'string') : [];
   }
 

@@ -407,7 +407,8 @@ async function handle(req) {
         const theme = interests.length && Math.random() < 0.6
           ? `${interests[Math.floor(Math.random() * interests.length)]} (one of their interests)`
           : THEMES[Math.floor(Math.random() * THEMES.length)];
-        const sys = TALK.replace("{N}", String(n)).replace("{NEW_HINT}", newHint).replace("{THEME}", theme);
+        let sys = TALK.replace("{N}", String(n)).replace("{NEW_HINT}", newHint).replace("{THEME}", theme);
+        if (body.onlyNew) sys += '\nIMPORTANT: Use ONLY these item types: exactly one "new" item, the rest "chat".';
         const user = `Learner's words (focus):\n${JSON.stringify(words)}\n\nAll known words (do not suggest these as new):\n${known.join(", ")}`;
         const out = await askJson(withProfile(sys, body), user, 0.9);
         return json({ items: Array.isArray(out?.items) ? out.items : [], _usage: USAGE }, 200, h);

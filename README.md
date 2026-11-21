@@ -61,9 +61,10 @@ olarak gösterir; **ins Heft** ile deftere eklenir. Okurken kanka araya soru sok
 
 ### Soru türleri
 
-En sık gelen iki tür: **„Was ist das?"** (sadece kelimenin görseli gösterilir) ve **Türkçe → Almanca** (Türkçesi
-gösterilir, Almancası artikeliyle yazılır; **Tipp** artikeli ve ilk harfleri gösterir, ipucu alınan cevap "zor" sayılır).
-Arada boşluk doldurma, Almanca açıklamadan bulma, hatırlama ve modelin hazırladığı cümleler/sorular gelir.
+Yalnızca iki tür soru var: **„Was ist das?"** (sadece kelimenin görseli gösterilir) ve **Türkçe → Almanca**
+(Türkçesi gösterilir, Almancası artikeliyle yazılır; **Tipp** artikeli ve ilk harfleri gösterir, ipucu alınan
+cevap "zor" sayılır). Görseli olmayan kelimeler Türkçe → Almanca sorulur. Arada kanka yeni kelime önerir ve
+düşünce balonlarında konuşur; model bunun için 2 dakikada bir, kısa bir istekle çağrılır.
 
 ### Akıllı tekrar
 
