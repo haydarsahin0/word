@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=30">
+  <link rel="stylesheet" href="css/style.css?v=34">
 </head>
 <body>
   <main class="card" id="card">
@@ -120,6 +120,12 @@
           <button class="btn sm" data-v="on">açık</button><button class="btn sm" data-v="off">kapalı</button>
         </div>
       </div>
+      <div class="setting">
+        <span>Ses <small class="muted" id="engineStatus"></small></span>
+        <div class="seg" id="engineSeg">
+          <button class="btn sm" data-v="thorsten">Thorsten</button><button class="btn sm" data-v="mls">Stimme 2</button><button class="btn sm" data-v="device">cihaz</button><button class="btn sm" id="engineTest" aria-label="Sesi dinle">▶</button>
+        </div>
+      </div>
 
       <div class="profile">
         <div class="list-head"><span>Kanka seni nasıl tanıyor</span>
@@ -148,12 +154,13 @@
     </div>
   </div>
 
-  <script src="js/sfx.js?v=30"></script>
-  <script src="js/dict.js?v=30"></script>
-  <script src="js/ai.js?v=30"></script>
-  <script src="js/translate.js?v=30"></script>
-  <script src="js/reader.js?v=30"></script>
-  <script src="js/scene.js?v=30"></script>
-  <script src="js/app.js?v=30"></script>
+  <script src="js/sfx.js?v=34"></script>
+  <script src="js/dict.js?v=34"></script>
+  <script src="js/ai.js?v=34"></script>
+  <script src="js/translate.js?v=34"></script>
+  <script src="js/voice.js?v=34"></script>
+  <script src="js/reader.js?v=34"></script>
+  <script src="js/scene.js?v=34"></script>
+  <script src="js/app.js?v=34"></script>
 </body>
 </html>

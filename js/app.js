@@ -34,6 +34,7 @@
       const s = JSON.parse(localStorage.getItem(STORE));
       if (s && Array.isArray(s.words)) {
         s.settings = Object.assign(defaults().settings, s.settings);
+        if (!['thorsten', 'mls', 'device'].includes(s.settings.engine)) s.settings.engine = 'thorsten';
         s.days = s.days || {};
         s.recent = Array.isArray(s.recent) ? s.recent : [];
         s.log = Array.isArray(s.log) ? s.log : [];
@@ -60,7 +61,7 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar', engine: 'thorsten' }, paused: false };
   }
   let syncDirty = false;
   function save(markDirty = true) {
@@ -368,6 +369,8 @@
     if (b.dataset.d) return +b.dataset.d > 0 ? 'plus' : 'minus';
     if (b.closest('#freqSeg')) return 'choice' + ['often', 'normal', 'rare'].indexOf(b.dataset.v);
     if (b.closest('#voiceSeg')) return b.dataset.v === 'on' ? 'on' : 'off';
+    if (b.id === 'engineTest') return null;
+    if (b.closest('#engineSeg')) return 'tap';
     if (b.closest('#sfxSeg')) return b.dataset.v === 'on' ? null : 'off';
     if (b.classList.contains('del')) return 'crumple';
     if (b.id === 'syncCreate' || b.id === 'syncJoin') return 'coin';
@@ -534,14 +537,31 @@
   const speakerSvg = '<svg viewBox="0 0 10 9" shape-rendering="crispEdges"><rect x="0" y="3" width="2" height="3"/><rect x="2" y="2" width="1" height="5"/><rect x="3" y="1" width="1" height="7"/><rect x="4" y="0" width="1" height="9"/><rect x="6" y="3" width="1" height="3"/><rect x="8" y="1" width="1" height="7"/></svg>';
   const speakBtn = (text) => `<button class="btn speak" data-say="${esc(text)}" aria-label="Sesli oku">${speakerSvg}</button>`;
 
+  /** Seslendir: önce kaliteli Piper sesi; hazır değilse ya da hata olursa cihazın sesi */
   function say(text) {
+    if (!text) return;
+    const engine = state.settings.engine || 'thorsten';
+    if (engine !== 'device' && window.Voice) {
+      if (Voice.isReady(engine)) {
+        if ('speechSynthesis' in window) speechSynthesis.cancel();
+        Voice.speak(text, engine).catch(() => deviceSay(text));
+        return;
+      }
+      Voice.load(engine).catch(() => {}); // arka planda hazırlansın; bu sefer cihaz sesi
+    }
+    deviceSay(text);
+  }
+  /** Cihazın sesi: en kaliteli Almanca sesi seç (Premium/Enhanced/Natural/Google önce) */
+  function deviceSay(text) {
     if (!('speechSynthesis' in window) || !text) return;
     try {
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'de-DE';
-      u.rate = 0.9;
-      const v = speechSynthesis.getVoices().find((x) => /^de/i.test(x.lang));
+      u.rate = 0.92;
+      const voices = speechSynthesis.getVoices().filter((x) => /^de/i.test(x.lang));
+      const score = (x) => (/premium/i.test(x.name + x.voiceURI) ? 4 : 0) + (/enhanced|erweitert/i.test(x.name + x.voiceURI) ? 3 : 0) + (/natural|online/i.test(x.name) ? 3 : 0) + (/google/i.test(x.name) ? 2 : 0) + (x.localService ? 0 : 1);
+      const v = voices.sort((a, b) => score(b) - score(a))[0];
       if (v) u.voice = v;
       speechSynthesis.speak(u);
     } catch (e) { /* desteklenmiyor */ }
@@ -1780,6 +1800,7 @@
     $('nameInput').value = state.settings.name || '';
     document.querySelectorAll('#sfxSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === (state.settings.sfx || 'on')));
     document.querySelectorAll('#voiceSeg .btn').forEach((b) => b.classList.toggle('on', b.dataset.v === state.settings.voice));
+    renderEngine();
     const mastered = state.words.filter((w) => (w.ivl || 0) >= 3 * DAY * 0.95).length;
     const reviews = Object.values(state.days).reduce((s, d) => s + (d.reviewed || 0), 0);
     const correct = Object.values(state.days).reduce((s, d) => s + (d.correct || 0), 0);
@@ -1902,6 +1923,28 @@
     state.settings.sfx = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
     if (b.dataset.v === 'on') sfx('on');
   });
+  $('engineSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'engineTest') { say(`Hallo${nameTag(' ')}! Das ist meine neue Stimme. Wie findest du sie?`); return; }
+    if (!b.dataset.v) return;
+    const prev = state.settings.engine || 'thorsten';
+    state.settings.engine = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
+    if (b.dataset.v === 'device' || !window.Voice) return;
+    // bir Piper sesi zaten yüklüyse yenisi için sayfa bir kez yenilenir
+    if (prev !== 'device' && prev !== b.dataset.v && Voice.status().status !== 'idle') { setTimeout(() => location.reload(), 250); return; }
+    Voice.load(b.dataset.v).catch(() => {});
+  });
+  if (window.Voice) Voice.onChange(() => { if (!$('sheet').hidden) renderEngine(); });
+  function renderEngine() {
+    const eng = state.settings.engine || 'thorsten';
+    document.querySelectorAll('#engineSeg [data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === eng));
+    const st = window.Voice ? Voice.status() : { status: 'error' };
+    $('engineStatus').textContent = eng === 'device' ? '' :
+      st.status === 'loading' ? `· yükleniyor %${st.percent}` :
+      st.status === 'ready' ? '· hazır ✓' :
+      st.status === 'error' ? '· yüklenemedi (cihaz sesi kullanılıyor)' : '· ilk kullanımda ~90 MB iner';
+  }
   $('voiceSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
     state.settings.voice = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
@@ -1961,6 +2004,17 @@
   }
   if (state.sync.code) setTimeout(syncNow, 1500);
   setTimeout(() => { if (typeof backfillUsage === 'function') backfillUsage(); }, 2500);
+  // kaliteli ses: arka planda hazırla; ilk indirmede kanka haber verir
+  setTimeout(() => {
+    const eng = state.settings.engine || 'thorsten';
+    if (state.settings.voice !== 'on' || eng === 'device' || !window.Voice || !isActive()) return;
+    let told = false;
+    const off = Voice.onChange((st) => {
+      if (st.status === 'loading' && st.percent > 0 && st.percent < 100 && !told && bubble.hidden) { told = true; think(`ich lade meine neue Stimme… %${st.percent}`, 4000); }
+      if (st.status === 'ready') { off(); if (told && bubble.hidden) think('neue Stimme ist bereit ✓', 4000); }
+    });
+    Voice.load(eng).catch(() => {});
+  }, 4000);
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }

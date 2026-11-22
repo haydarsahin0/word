@@ -96,6 +96,14 @@ saklanır; her cihaz kendi kaydına yazar, diğerlerini birleştirir. Silinen ke
 Karakter yalnızca basit Almanca konuşur. Türkçe sadece kelimenin karşılığında görünür; cümle çevirileri
 balondaki **TR** düğmesine dokununca açılır.
 
+### Ses
+
+Kelimeler ve cümleler **Piper** ile okunur: açık kaynaklı, nöral bir Almanca ses; tamamen tarayıcıda çalışır,
+ücretsizdir. İlk kullanımda bir kez ~90 MB indirilir (ses modeli Hugging Face'ten, motor jsDelivr'dan) ve service
+worker'ın kalıcı önbelleğinde saklanır; sonra internetsiz de çalışır. Ayarlarda **Thorsten** (varsayılan),
+**Stimme 2** (MLS) ya da **cihaz** sesi seçilir; ▶ ile dinlenir. Piper hazır değilse cihazın en kaliteli Almanca sesi
+kullanılır. "low" kalitedeki eski Piper modelleri (Kerstin, Ramona, Eva) bazı Almanca seslerde bozulduğu için yok.
+
 ### Seni tanıması
 
 Uygulama yaptıklarını küçük bir günlükte tutar: sorduğun kelimeler (yazdığın hâliyle), quiz sonuçları,
