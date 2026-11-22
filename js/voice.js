@@ -107,32 +107,58 @@
   }
 
   const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  let token = 0;
+  let active = false;
+  let chain = Promise.resolve(); // model aynı anda tek iş yapsın
 
-  /** Seslendir. Çalamazsa hata fırlatır (uygulama cihaz sesine geçer). */
-  async function speak(text, key) {
-    text = String(text || '').trim();
-    if (!text) return false;
-    const v = VOICES[key] || VOICES.thorsten;
-    const s = await load(key);
+  function clipFor(s, v, text) {
     const k = v.id + '|' + text;
-    let url = clips.get(k);
-    if (!url) {
-      // yavaş cihazda takılmasın: 8 sn'de hazır değilse cihaz sesi (hazırlanan ses yine önbelleğe girer)
-      const job = s.predict(text).then((wav) => {
-        const u = URL.createObjectURL(wav);
-        clips.set(k, u);
-        if (clips.size > 80) { const [ok, ou] = clips.entries().next().value; URL.revokeObjectURL(ou); clips.delete(ok); }
-        return u;
-      });
-      url = await withTimeout(job, 8000);
-    }
-    player.pause();
-    player.src = url;
-    player.currentTime = 0;
-    await player.play(); // izin yoksa hata → cihaz sesi
-    lastError = '';
-    return true;
+    if (clips.has(k)) return Promise.resolve(clips.get(k));
+    const job = chain.then(() => (clips.has(k) ? clips.get(k) : s.predict(text).then((wav) => {
+      const u = URL.createObjectURL(wav);
+      clips.set(k, u);
+      if (clips.size > 120) { const [ok, ou] = clips.entries().next().value; URL.revokeObjectURL(ou); clips.delete(ok); }
+      return u;
+    })));
+    chain = job.catch(() => {});
+    return job;
   }
+  function playUrl(url) {
+    return new Promise((resolve, reject) => {
+      player.onended = () => resolve();
+      player.onerror = () => reject(new Error('play_error'));
+      player.pause();
+      player.src = url;
+      player.currentTime = 0;
+      const pr = player.play();
+      if (pr && pr.catch) pr.catch(reject);
+    });
+  }
+
+  /** Birkaç cümleyi sırayla oku: ilk cümle hazır olunca hemen başlar, gerisi arkada hazırlanır. */
+  async function speakAll(parts, key) {
+    parts = (parts || []).map((t) => String(t || '').trim()).filter(Boolean);
+    if (!parts.length) return false;
+    const my = ++token;
+    active = true;
+    try {
+      const v = VOICES[key] || VOICES.thorsten;
+      const s = await load(key);
+      const jobs = parts.map((t) => clipFor(s, v, t)); // hepsini sıraya koy
+      for (let i = 0; i < jobs.length; i++) {
+        const url = await withTimeout(jobs[i], i === 0 ? 8000 : 15000);
+        if (my !== token) return false; // bu arada başka bir şey okunmaya başlandı
+        await playUrl(url);
+        if (my !== token) return false;
+      }
+      lastError = '';
+      return true;
+    } finally {
+      if (my === token) active = false;
+    }
+  }
+  const speak = (text, key) => speakAll([text], key);
+  function stop() { token++; active = false; try { player.pause(); } catch (e) { /* yok say */ } }
 
   function lastPlayError() { return lastError; }
 
@@ -140,6 +166,9 @@
     VOICES,
     load,
     speak,
+    speakAll,
+    stop,
+    isSpeaking: () => active,
     isReady: (key) => status === 'ready' && sessionId === (VOICES[key] || VOICES.thorsten).id,
     status: () => ({ status, percent, error: lastError }),
     onChange: (f) => { listeners.add(f); return () => listeners.delete(f); },

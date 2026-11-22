@@ -104,6 +104,13 @@ worker'ın kalıcı önbelleğinde saklanır; sonra internetsiz de çalışır. 
 **Stimme 2** (MLS) ya da **cihaz** sesi seçilir; ▶ ile dinlenir. Piper hazır değilse cihazın en kaliteli Almanca sesi
 kullanılır. "low" kalitedeki eski Piper modelleri (Kerstin, Ramona, Eva) bazı Almanca seslerde bozulduğu için yok.
 
+### Sesli anlatım
+
+Ayarlardaki **Sesli okuma: kapalı / kelime / anlatım** (varsayılan anlatım). Anlatımda kanka kelimeyi artikeliyle,
+basit Almanca açıklamasını ve (yeni kelimede, yanlış cevapta, kitaptan bakılan kelimede) bir örnek cümleyi ve
+fiillerde Perfekt'i okur; doğru cevapta kelime + açıklama. Ses cümle cümle hazırlanıp çalınır (ilk cümle hemen
+başlar), konuşurken karakterin ağzı oynar ve anlatım bitmeden yeni soru gelmez. Kartlardaki 🔊 anlatımı okur.
+
 ### Seni tanıması
 
 Uygulama yaptıklarını küçük bir günlükte tutar: sorduğun kelimeler (yazdığın hâliyle), quiz sonuçları,

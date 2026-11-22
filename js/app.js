@@ -35,6 +35,7 @@
       if (s && Array.isArray(s.words)) {
         s.settings = Object.assign(defaults().settings, s.settings);
         if (!['thorsten', 'mls', 'device'].includes(s.settings.engine)) s.settings.engine = 'thorsten';
+        if (s.settings.voice === 'on') s.settings.voice = 'explain'; // eski "açık" → anlatım
         s.days = s.days || {};
         s.recent = Array.isArray(s.recent) ? s.recent : [];
         s.log = Array.isArray(s.log) ? s.log : [];
@@ -61,7 +62,7 @@
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar', engine: 'thorsten' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'explain', sfx: 'on', name: 'Haydar', engine: 'thorsten' }, paused: false };
   }
   let syncDirty = false;
   function save(markDirty = true) {
@@ -368,7 +369,7 @@
     if (ACT_SOUNDS[act]) return ACT_SOUNDS[act];
     if (b.dataset.d) return +b.dataset.d > 0 ? 'plus' : 'minus';
     if (b.closest('#freqSeg')) return 'choice' + ['often', 'normal', 'rare'].indexOf(b.dataset.v);
-    if (b.closest('#voiceSeg')) return b.dataset.v === 'on' ? 'on' : 'off';
+    if (b.closest('#voiceSeg')) return b.dataset.v === 'off' ? 'off' : 'on';
     if (b.id === 'engineTest') return null;
     if (b.closest('#engineSeg')) return 'tap';
     if (b.closest('#sfxSeg')) return b.dataset.v === 'on' ? null : 'off';
@@ -538,18 +539,41 @@
   const speakBtn = (text) => `<button class="btn speak" data-say="${esc(text)}" aria-label="Sesli oku">${speakerSvg}</button>`;
 
   /** Seslendir: önce kaliteli Piper sesi; hazır değilse ya da hata olursa cihazın sesi */
-  function say(text) {
-    if (!text) return;
+  function say(text) { speakParts([text]); }
+  /** Cümleleri sırayla oku (Piper hazırsa onunla, değilse cihaz sesiyle) */
+  function speakParts(parts) {
+    parts = (parts || []).filter(Boolean);
+    if (!parts.length) return;
     const engine = state.settings.engine || 'thorsten';
     if (engine !== 'device' && window.Voice) {
       if (Voice.isReady(engine)) {
         if ('speechSynthesis' in window && speechSynthesis.speaking) speechSynthesis.cancel();
-        Voice.speak(text, engine).catch((e) => { lastVoiceError = String((e && e.message) || e); deviceSay(text); });
+        Voice.speakAll(parts, engine).catch((e) => { lastVoiceError = String((e && e.message) || e); deviceSay(parts.join(' ')); });
         return;
       }
       Voice.load(engine).catch(() => {}); // arka planda hazırlansın; bu sefer cihaz sesi
     }
-    deviceSay(text);
+    deviceSay(parts.join(' '));
+  }
+  const isSpeaking = () => (window.Voice && Voice.isSpeaking()) || ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending));
+  /** Kelimeyi anlatan cümleler: kelime, basit açıklama, (tam anlatımda) örnek ve fiilse Perfekt */
+  function aboutParts(w, full, exOverride) {
+    const parts = [fullDe(w) + '.'];
+    if (w.explain_de) parts.push(w.explain_de);
+    if (full) {
+      const u = w.usage || {};
+      const ex = (exOverride && exOverride.de) || (u.examples && u.examples[0] && u.examples[0].de) || (w.ex && w.ex.de) || '';
+      if (ex) parts.push('Zum Beispiel: ' + ex);
+      if (u.forms && u.forms.perfekt) parts.push('Perfekt: ' + u.forms.perfekt + '.');
+    }
+    return parts;
+  }
+  /** Ayara göre: kapalı / sadece kelime / anlatım */
+  function sayAbout(w, full, ex) {
+    const mode = state.settings.voice;
+    if (mode === 'off' || !w) return;
+    if (mode === 'word') return say(fullDe(w));
+    speakParts(aboutParts(w, full, ex));
   }
   /** Cihazın sesi: en kaliteli Almanca sesi seç (Premium/Enhanced/Natural/Google önce) */
   let lastVoiceError = '';
@@ -693,7 +717,7 @@
     const sayLine = opts.say && w.say_de ? `<div class="b-say">${esc(w.say_de)}</div>` : '';
     const img = w.img && !opts.noImg ? `<img class="b-img" src="${esc(w.img)}" alt="" loading="lazy">` : '';
     return `<div class="b-tag">${tag}</div>${img}${sayLine}
-      <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(fullDe(w))}</div>
+      <div class="b-word">${w.art ? `<span class="art">${esc(w.art)}</span>` : ''}${esc(w.de)} ${speakBtn(aboutParts(w, true, opts.ex).join(' | '))}</div>
       <div class="b-mean">${esc(w.tr)}${alts}${plural}</div>${meaning}${simple}${ex}`;
   }
 
@@ -738,7 +762,7 @@
     showBubble(`${wordCard(w, 'neues Wort · steht jetzt in meinem Heft', { say: true })}
       <div class="b-actions"><button class="btn sm" data-act="close">ok</button><button class="btn sm" data-act="edit" data-id="${w.id}">korrigieren</button></div>`,
       'info', { autoClose: 25000 });
-    if (state.settings.voice === 'on') say(fullDe(w));
+    sayAbout(w, true);
     celebrateGoal();
   }
 
@@ -750,7 +774,7 @@
     setMood('happy', 1800);
     showBubble(`${wordCard(w, 'das kennen wir schon ✓', { ex: nextSentence(w, false, false) || w.ex })}${typo}
       <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 15000 });
-    if (state.settings.voice === 'on') say(fullDe(w));
+    sayAbout(w, true);
   }
 
   function hideBubbleQuiet() {
@@ -1020,7 +1044,7 @@
       showBubble(`${wordCard(w, 'kein Problem – so ist es richtig, ich frage dich wieder', { ex: shownEx })}
         <div class="b-actions"><button class="btn sm solid" data-act="close">ok</button></div>`, 'feedback', { autoClose: 6000, focus: false });
     }
-    if (state.settings.voice === 'on') say(fullDe(w));
+    sayAbout(w, !ok, shownEx); // doğruysa kısa (kelime + açıklama), yanlışsa örnekle birlikte
     current = null;
   }
 
@@ -1228,7 +1252,7 @@
     showUsage(w);
     setMood('happy', 1800);
     showBubble(`${wordCard(w, 'steht im Heft ✓ ich frage dich oft')}<div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 9000 });
-    if (state.settings.voice === 'on') say(fullDe(w));
+    sayAbout(w, true);
     celebrateGoal();
   }
 
@@ -1535,7 +1559,7 @@
       showBubble(`${wordCard(pendingBook, 'aus deinem Buch', { ex, mark: word, say: true })}
         <div class="b-actions"><button class="btn sm solid" data-act="addbook">ins Heft</button><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 30000, focus: false });
     }
-    if (state.settings.voice === 'on') say((res.art ? res.art + ' ' : '') + res.de);
+    sayAbout(known || res, true, ex);
   }
   function addFromBook() {
     if (!pendingBook) return hideBubble();
@@ -1589,11 +1613,12 @@
     submitWord(v);
   });
   $('wordInput').addEventListener('focus', () => { if (!busy && !bubbleKind) setMood('listening', 6000); });
+  $('wordInput').addEventListener('input', () => { if (window.Voice) Voice.stop(); });
   $('wordInput').addEventListener('input', () => { if (!busy && !bubbleKind) setMood('listening', 6000); });
 
   bubble.addEventListener('click', (e) => {
     const sayBtn = e.target.closest('[data-say]');
-    if (sayBtn) { say(sayBtn.dataset.say); return; }
+    if (sayBtn) { speakParts(sayBtn.dataset.say.split(' | ')); return; }
     const b = e.target.closest('[data-act]');
     if (!b) { clearTimeout(bubbleTimer); return; }
     if (b.dataset.act === 'say-ex') { say(b.dataset.text); return; }
@@ -1723,11 +1748,12 @@
 
   /* ---------- sürekli döngü ---------- */
   /** Balon kapanınca sıradaki soruyu hemen getir (1 sn'lik döngüyü beklemeden) */
+  let wasSpeaking = false;
   function tickTalk() {
     const now = Date.now();
     if (state.paused || !isActive() || busy || bubbleKind) return;
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
-    if (typingNow || now < readerQuietUntil || now < nextReviewAt) return;
+    if (typingNow || now < readerQuietUntil || now < nextReviewAt || isSpeaking()) return;
     nextTalk();
   }
 
@@ -1743,12 +1769,15 @@
       const m = r < 0.5 ? 'typing' : r < 0.66 ? 'thinking' : r < 0.77 ? 'window' : r < 0.9 ? 'coffee' : 'stretch';
       const dur = { typing: 7000 + Math.random() * 6000, thinking: 3500 + Math.random() * 4000, window: 3500 + Math.random() * 4000, coffee: 2900, stretch: 2400 }[m];
       setMood(m, dur);
-    } else if (bubbleKind && now > moodUntil && ['talking', 'happy', 'sad', 'listening', 'reading'].includes(scene.mood)) {
-      scene.setMood('waiting');
+    } else if (bubbleKind && now > moodUntil && ['talking', 'happy', 'sad', 'listening', 'reading', 'waiting'].includes(scene.mood)) {
+      scene.setMood(isSpeaking() ? 'talking' : 'waiting');
     }
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
     const reading = now < readerQuietUntil; // okurken kanka araya girmez
-    if (!bubbleKind && !typingNow && !reading && now >= nextReviewAt) {
+    // anlatım bitmeden yeni soru yok; bitince kısa bir nefes
+    if (isSpeaking()) { wasSpeaking = true; if (!bubbleKind && scene.mood !== 'talking') scene.setMood('talking'); }
+    else if (wasSpeaking) { wasSpeaking = false; nextReviewAt = Math.max(nextReviewAt, now + 600); }
+    if (!bubbleKind && !typingNow && !reading && !isSpeaking() && now >= nextReviewAt) {
       nextTalk();
     } else if (!bubbleKind && !typingNow && !reading && thought.hidden && now >= nextThoughtAt) {
       idleThought();
@@ -2021,7 +2050,7 @@
   // kaliteli ses: arka planda hazırla; ilk indirmede kanka haber verir
   setTimeout(() => {
     const eng = state.settings.engine || 'thorsten';
-    if (state.settings.voice !== 'on' || eng === 'device' || !window.Voice || !isActive()) return;
+    if (state.settings.voice === 'off' || eng === 'device' || !window.Voice || !isActive()) return;
     let told = false;
     const off = Voice.onChange((st) => {
       if (st.status === 'loading' && st.percent > 0 && st.percent < 100 && !told && bubble.hidden) { told = true; think(`ich lade meine neue Stimme… %${st.percent}`, 4000); }
