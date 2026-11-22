@@ -35,6 +35,7 @@
       if (s && Array.isArray(s.words)) {
         s.settings = Object.assign(defaults().settings, s.settings);
         if (!['thorsten', 'mls', 'device'].includes(s.settings.engine)) s.settings.engine = 'thorsten';
+        if (s.settings.voice !== 'off') s.settings.voice = 'on'; // geri alınan "kelime/anlatım" ayarı → açık
         s.days = s.days || {};
         s.recent = Array.isArray(s.recent) ? s.recent : [];
         s.log = Array.isArray(s.log) ? s.log : [];
@@ -197,6 +198,7 @@
     });
     if ((r.settingsAt || 0) > (state.settingsAt || 0) && r.settings) {
       state.settings = Object.assign({}, state.settings, r.settings);
+      if (state.settings.voice !== 'off') state.settings.voice = 'on';
       state.settingsAt = r.settingsAt;
     }
     if ((r.profileAt || 0) > (state.profileAt || 0) && r.profile) {
