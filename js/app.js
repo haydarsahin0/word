@@ -1296,7 +1296,10 @@
   const usageFails = new Map();
   let usageBusy = false, usageNextAt = 0, usageTotal = 0, usageDone = 0;
   let usageShownId = null, usageExpanded = false, pendingUsageWord = null;
-  const hasUsage = (w) => !!(w && w.usage && Array.isArray(w.usage.collocations));
+  // fiil mi? (sözlük türü 'v' ya da artikelsiz, -en/-ern/-eln ile biten küçük harfli kelime)
+  const isVerb = (w) => w.pos === 'v' || (!w.pos && !w.art && /^[a-zäöüß]+(en|ern|eln)$/.test(w.de || ''));
+  // fiillerde çekim satırı da olmalı (eski kartlar bir kez yeniden hazırlanır)
+  const hasUsage = (w) => !!(w && w.usage && Array.isArray(w.usage.collocations) && (!isVerb(w) || 'forms' in w.usage));
   const isNarrow = () => stage.clientWidth < 700;
 
   function cleanUsage(it) {
@@ -1310,6 +1313,11 @@
       opposite: str(it.opposite, 40),
       context_de: str(it.context_de, 220),
       context_tr: str(it.context_tr, 220),
+      // fiil çekimi (fiil değilse boş nesne: tekrar istenmez)
+      forms: it.forms && typeof it.forms === 'object' ? {
+        praesens: str(it.forms.praesens, 60), praeteritum: str(it.forms.praeteritum, 60),
+        perfekt: str(it.forms.perfekt, 60), trennbar: str(it.forms.trennbar, 60),
+      } : {},
     };
   }
   function queueUsage(w, priority) {
@@ -1389,7 +1397,13 @@
       const opp = u.opposite ? `${syn ? ' · ' : ''}<span>Gegenteil:</span> ${esc(u.opposite)}` : '';
       html = `<div class="u-tag">So benutzt man <b>${esc(fullDe(w))}</b></div>
         ${u.pattern ? `<div class="u-pat">${esc(u.pattern)}</div>` : ''}
-        ${u.collocations.length ? `<div class="u-chips">${u.collocations.map((c) => `<span>${esc(c)}</span>`).join('')}</div>` : ''}
+        ${u.forms && (u.forms.praeteritum || u.forms.perfekt) ? `<div class="u-forms">
+          ${u.forms.praesens ? `<div><span class="lbl">Präsens</span><em>${esc(u.forms.praesens)}</em></div>` : ''}
+          ${u.forms.praeteritum ? `<div><span class="lbl">Präteritum</span><em>${esc(u.forms.praeteritum)}</em></div>` : ''}
+          ${u.forms.perfekt ? `<div><span class="lbl">Perfekt</span><em>${esc(u.forms.perfekt).replace(/\b(hat|ist)\b/, '<b>$1</b>')}</em></div>` : ''}
+          ${u.forms.trennbar ? `<div class="sep"><span class="lbl">trennbar</span><em>${esc(u.forms.trennbar)}</em></div>` : ''}
+        </div>` : ''}
+        ${u.collocations.length ? `<div class="u-chips">${u.collocations.slice(0, 5).map((c) => `<span>${esc(c)}</span>`).join('')}</div>` : ''}
         ${ex ? `<ol class="u-ex">${ex}</ol>` : ''}
         ${syn || opp ? `<div class="u-row">${syn}${opp}</div>` : ''}
         ${u.context_de ? `<div class="u-row"><span>Wann?</span> ${esc(u.context_de)}${u.context_tr ? `<span class="tr">${esc(u.context_tr)}</span>` : ''}</div>` : ''}

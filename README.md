@@ -46,7 +46,8 @@ Aynı kelime üst üste gelmez (az kelimede 25 sn, çok kelimede 90 sn ara).
 Odanın sağında ikinci bir çalışan var (yuvarlak gözlük, topuz, tüplü bilgisayar ve kelime kartı kutusu). Bir kelimenin
 cevabı ortaya çıktığı anda (soru cevaplanınca, kelime aranınca, kitaptan ya da öneriden eklenince) kendi kartında
 o kelimenin **nasıl kullanıldığını** gösterir: dil bilgisi kalıbı, en sık birlikte kullanıldığı fiil/sıfatlar, farklı
-bağlamlarda 3 örnek cümle, eş/zıt anlamlılar ve ne zaman kullanıldığı (Türkçesi TR düğmesinde). Kart, sorulan
+bağlamlarda 3 örnek cümle, eş/zıt anlamlılar ve ne zaman kullanıldığı (Türkçesi TR düğmesinde). Fiillerde
+ayrıca çekim satırı: Präsens (gerekirse du-formu), Präteritum, Perfekt (hat/ist kalın) ve ayrılabiliyorsa nasıl ayrıldığı. Kart, sorulan
 kelimeyi ele vermemek için hep cevabı verilmiş kelimeyi gösterir. Bilgiler kelime başına **bir kez** üretilir
 (Worker `usage` eylemi, 8'erli paketler), kelimeyle saklanır ve senkronlanır; ilk açılışta mevcut kelimelerin hepsi
 toplu hazırlanır. Dar ekranlarda kart küçük bir etiket olarak görünür, dokununca açılır.

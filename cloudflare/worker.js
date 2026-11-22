@@ -223,8 +223,15 @@ For each input word return:
   "synonyms": ["<0–3 common near-synonyms>"],
   "opposite": "<common opposite or empty>",
   "context_de": "<one simple German sentence: when/where people use it (formal/informal, typical situations)>",
-  "context_tr": "<the same in Turkish>"
+  "context_tr": "<the same in Turkish>",
+  "forms": <ONLY if the word is a verb, otherwise null> {
+    "praesens": "<3rd person singular present; add the du-form in brackets if the stem changes, e.g. 'er fährt (du fährst)', 'er verweist'>",
+    "praeteritum": "<3rd person singular Präteritum, e.g. 'er fuhr', 'er verwies'>",
+    "perfekt": "<3rd person Perfekt with the CORRECT auxiliary, e.g. 'er ist gefahren', 'er hat verwiesen'>",
+    "trennbar": "<if the verb is separable: show it, e.g. 'er ruft … an'; otherwise empty>"
+  }
 }
+Double-check irregular forms and haben/sein — they must be correct.
 Return ONLY JSON: {"items": [ ... ]}`;
 
 const CHECK = `${PERSONA}
