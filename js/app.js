@@ -543,8 +543,8 @@
     const engine = state.settings.engine || 'thorsten';
     if (engine !== 'device' && window.Voice) {
       if (Voice.isReady(engine)) {
-        if ('speechSynthesis' in window) speechSynthesis.cancel();
-        Voice.speak(text, engine).catch(() => deviceSay(text));
+        if ('speechSynthesis' in window && speechSynthesis.speaking) speechSynthesis.cancel();
+        Voice.speak(text, engine).catch((e) => { lastVoiceError = String((e && e.message) || e); deviceSay(text); });
         return;
       }
       Voice.load(engine).catch(() => {}); // arka planda hazırlansın; bu sefer cihaz sesi
@@ -552,18 +552,22 @@
     deviceSay(text);
   }
   /** Cihazın sesi: en kaliteli Almanca sesi seç (Premium/Enhanced/Natural/Google önce) */
+  let lastVoiceError = '';
   function deviceSay(text) {
     if (!('speechSynthesis' in window) || !text) return;
     try {
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'de-DE';
-      u.rate = 0.92;
-      const voices = speechSynthesis.getVoices().filter((x) => /^de/i.test(x.lang));
-      const score = (x) => (/premium/i.test(x.name + x.voiceURI) ? 4 : 0) + (/enhanced|erweitert/i.test(x.name + x.voiceURI) ? 3 : 0) + (/natural|online/i.test(x.name) ? 3 : 0) + (/google/i.test(x.name) ? 2 : 0) + (x.localService ? 0 : 1);
-      const v = voices.sort((a, b) => score(b) - score(a))[0];
-      if (v) u.voice = v;
-      speechSynthesis.speak(u);
+      const go = () => {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'de-DE';
+        u.rate = 0.92;
+        const voices = speechSynthesis.getVoices().filter((x) => /^de/i.test(x.lang));
+        const score = (x) => (/premium/i.test(x.name + x.voiceURI) ? 4 : 0) + (/enhanced|erweitert/i.test(x.name + x.voiceURI) ? 3 : 0) + (/natural|online/i.test(x.name) ? 3 : 0) + (/google/i.test(x.name) ? 2 : 0);
+        const v = voices.sort((a, b) => score(b) - score(a))[0];
+        if (v) u.voice = v;
+        speechSynthesis.speak(u);
+      };
+      // iPad: iptal edip aynı anda konuşturunca bazen sessiz kalıyor — kısa ara ver
+      if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(go, 80); } else go();
     } catch (e) { /* desteklenmiyor */ }
   }
 
@@ -1926,7 +1930,16 @@
   $('engineSeg').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.id === 'engineTest') { say(`Hallo${nameTag(' ')}! Das ist meine neue Stimme. Wie findest du sie?`); return; }
+    if (b.id === 'engineTest') {
+      const txt = `Hallo${nameTag(' ')}! Das ist meine neue Stimme. Wie findest du sie?`;
+      const eng = state.settings.engine || 'thorsten';
+      if (eng === 'device' || !window.Voice) { deviceSay(txt); $('engineStatus').textContent = '· cihaz sesi çalındı'; return; }
+      $('engineStatus').textContent = '· hazırlanıyor…';
+      Voice.speak(txt, eng)
+        .then(() => { $('engineStatus').textContent = '· çalındı ✓ (duymadıysan ses düzeyini kontrol et)'; })
+        .catch((err) => { deviceSay(txt); $('engineStatus').textContent = `· Piper çalamadı (${String((err && err.message) || err).slice(0, 60)}) – cihaz sesi kullanıldı`; });
+      return;
+    }
     if (!b.dataset.v) return;
     const prev = state.settings.engine || 'thorsten';
     state.settings.engine = b.dataset.v; state.settingsAt = Date.now(); save(); renderSheet();
@@ -1943,7 +1956,8 @@
     $('engineStatus').textContent = eng === 'device' ? '' :
       st.status === 'loading' ? `· yükleniyor %${st.percent}` :
       st.status === 'ready' ? '· hazır ✓' :
-      st.status === 'error' ? '· yüklenemedi (cihaz sesi kullanılıyor)' : '· ilk kullanımda ~90 MB iner';
+      st.status === 'error' ? `· yüklenemedi: ${String(st.error || '').slice(0, 60)} (cihaz sesi kullanılıyor)` :
+      lastVoiceError ? `· son hata: ${lastVoiceError.slice(0, 50)}` : '· ilk kullanımda ~90 MB iner';
   }
   $('voiceSeg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
