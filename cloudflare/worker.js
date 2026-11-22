@@ -211,6 +211,22 @@ paraphrase them — every sentence must be brand new. Keep it fresh and varied:
 Prefer words with a low level (they need practice). Use each word at most once. Include at most one \"chat\" item. {NEW_HINT}
 Return: {"items":[ ... ]}`;
 
+const USAGE_PROMPT = `You are an experienced German teacher and lexicographer helping a Turkish learner (A2–B1) who needs to know
+HOW and IN WHICH CONTEXT a word is really used. For each word give accurate, very frequent, natural usage — never invent rare or odd
+combinations. German must be correct and simple (A2–B1). Turkish must be natural.
+For each input word return:
+{
+  "id": "<same id>",
+  "pattern": "<the key grammar pattern, e.g. 'etwas (Akk) verweisen an + Akk', 'sich bewerben um + Akk / bei + Dat', 'die Geduld (kein Plural)', 'Pl. die Koffer'>",
+  "collocations": ["<4–6 of the MOST common combinations with verbs/adjectives/prepositions, short, e.g. 'Geduld haben', 'die Geduld verlieren', 'mit viel Geduld'>"],
+  "examples": [{"de": "<everyday sentence, 6–12 words, contains the word>", "tr": "<Turkish>"}, ... exactly 3, each in a DIFFERENT typical context (e.g. work, home, shopping)],
+  "synonyms": ["<0–3 common near-synonyms>"],
+  "opposite": "<common opposite or empty>",
+  "context_de": "<one simple German sentence: when/where people use it (formal/informal, typical situations)>",
+  "context_tr": "<the same in Turkish>"
+}
+Return ONLY JSON: {"items": [ ... ]}`;
+
 const CHECK = `${PERSONA}
 
 You asked the learner a question in German. Judge their answer kindly. Small mistakes are fine if it is understandable.
@@ -371,6 +387,20 @@ async function handle(req) {
         const img = await generateImage(imagePrompt(scene));
         await store.fetch("https://img/", { method: "POST", body: JSON.stringify({ op: "put", key, b64: img.b64, type: img.type }) });
         return json({ url, cached: false, scene, _usage: { ...USAGE, images: 1 } }, 200, h);
+      }
+
+      // ---------- ikinci çalışan: kullanım bilgisi (kelime başına bir kez) ----------
+      case "usage": {
+        const words = (Array.isArray(body.words) ? body.words : []).slice(0, 8).map((w) => ({
+          id: String(w.id ?? "").slice(0, 20),
+          word: (String(w.art ?? "") + " " + String(w.de ?? "")).trim().slice(0, 60),
+          turkish: String(w.tr ?? "").slice(0, 60),
+          pos: String(w.pos ?? "").slice(0, 2),
+        })).filter((w) => w.id && w.word);
+        if (!words.length) return json({ items: [] }, 200, h);
+        EFFORT = "medium"; // kelime başına bir kez üretilir: doğruluk önemli
+        const out = await askJson(USAGE_PROMPT, JSON.stringify(words), 0.3);
+        return json({ items: Array.isArray(out?.items) ? out.items : [], _usage: USAGE }, 200, h);
       }
 
       case "ping":

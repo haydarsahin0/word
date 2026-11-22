@@ -41,6 +41,16 @@ soru türüyle gelir; az görülen ve düşük seviyeli kelimeler öne alınır.
 bildiğinde artar (2 dk → 10 dk → 1 saat → 5 saat → 1 gün → 3 gün …); aradaki tüm tekrarlar "Extra-Übung"dur.
 Aynı kelime üst üste gelmez (az kelimede 25 sn, çok kelimede 90 sn ara).
 
+### İkinci çalışan: kullanım uzmanı
+
+Odanın sağında ikinci bir çalışan var (yuvarlak gözlük, topuz, tüplü bilgisayar ve kelime kartı kutusu). Bir kelimenin
+cevabı ortaya çıktığı anda (soru cevaplanınca, kelime aranınca, kitaptan ya da öneriden eklenince) kendi kartında
+o kelimenin **nasıl kullanıldığını** gösterir: dil bilgisi kalıbı, en sık birlikte kullanıldığı fiil/sıfatlar, farklı
+bağlamlarda 3 örnek cümle, eş/zıt anlamlılar ve ne zaman kullanıldığı (Türkçesi TR düğmesinde). Kart, sorulan
+kelimeyi ele vermemek için hep cevabı verilmiş kelimeyi gösterir. Bilgiler kelime başına **bir kez** üretilir
+(Worker `usage` eylemi, 8'erli paketler), kelimeyle saklanır ve senkronlanır; ilk açılışta mevcut kelimelerin hepsi
+toplu hazırlanır. Dar ekranlarda kart küçük bir etiket olarak görünür, dokununca açılır.
+
 ### Kelime görselleri
 
 Her kelime için önce dil modeli, anlamı **bir bakışta** anlatan somut bir sahne tasarlar (ör. *Geduld*: uzun bir

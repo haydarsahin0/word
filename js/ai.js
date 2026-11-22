@@ -10,7 +10,7 @@
   let usageCb = null;
 
   async function call(action, payload, ms = 25000) {
-    const independent = action === 'image'; // görseller konuşma hatalarından etkilenmesin
+    const independent = action === 'image' || action === 'usage'; // görseller/kullanım bilgisi konuşma hatalarından etkilenmesin
     if (!independent && Date.now() < downUntil) throw new Error('ai_down');
     // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri hariç
     if (action !== 'lookup' && !activeCheck()) throw new Error('inactive');
@@ -82,6 +82,12 @@
     return j.url || null;
   }
 
+  /** İkinci çalışan: kelimelerin kullanım bilgisi (en fazla 8 kelime, kelime başına bir kez) */
+  async function usage(words) {
+    const j = await call('usage', { words }, 120000);
+    return Array.isArray(j.items) ? j.items : [];
+  }
+
   async function profile(old, events) {
     return call('profile', { old, events }, 45000);
   }
@@ -117,7 +123,7 @@
   };
 
   window.AI = {
-    lookup, talk, check, profile, image,
+    lookup, talk, check, profile, image, usage,
     setProfileProvider: (fn) => { profileProvider = fn; },
     setActiveCheck: (fn) => { activeCheck = fn; },
     onUsage: (fn) => { usageCb = fn; },

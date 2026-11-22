@@ -169,6 +169,9 @@
     if (a.seenDay === b.seenDay) m.seenToday = Math.max(a.seenToday || 0, b.seenToday || 0);
     else { const sd = (a.seenDay || '') > (b.seenDay || '') ? a : b; m.seenDay = sd.seenDay; m.seenToday = sd.seenToday; }
     m.seenAt = Math.max(a.seenAt || 0, b.seenAt || 0);
+    const withImg = [a, b].filter((x) => x.img).sort((x, y) => (y.imgV || 0) - (x.imgV || 0))[0];
+    if (withImg) { m.img = withImg.img; m.imgV = withImg.imgV; }
+    if (!m.usage) m.usage = a.usage || b.usage;
     return m;
   }
 
@@ -411,6 +414,7 @@
     syncGround();
     placeBubble();
     if (typeof placeThought === 'function') placeThought();
+    if (typeof placeBubble2 === 'function') placeBubble2();
   }
   let fitTimer = 0;
   const scheduleFit = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitToScreen, 60); };
@@ -506,6 +510,7 @@
     bubble.style.left = left + 'px';
     bubble.style.bottom = (sr.height - hy + 14) + 'px';
     const cardTop = $('card').getBoundingClientRect().top;
+    if (typeof placeBubble2 === 'function') setTimeout(placeBubble2, 0);
     const inner = bubble.firstElementChild;
     if (inner) {
       const maxH = Math.max(140, sr.top - cardTop + hy - 54);
@@ -703,6 +708,7 @@
     await sleep(900);
     const w = addWord(res);
     logEvent('lookup', { q, de: fullDe(w), tr: w.tr, pos: w.pos });
+    showUsage(w);
     busy = false;
     setMood('talking', 1500);
     showBubble(`${wordCard(w, 'neues Wort · steht jetzt in meinem Heft', { say: true })}
@@ -714,6 +720,7 @@
 
   function showKnown(w, q) {
     logEvent('lookup_again', { q, de: fullDe(w), level: w.level });
+    showUsage(w);
     const typo = q && deKey(q) !== deKey(w.de) && T.lowerTr(q.trim()) !== T.lowerTr(w.tr)
       ? `<div class="b-hint">man schreibt: <b>${esc(fullDe(w))}</b></div>` : '';
     setMood('happy', 1800);
@@ -745,6 +752,7 @@
     state.words.push(w);
     touch(w);
     if (typeof ensureImage === 'function') setTimeout(() => ensureImage(w), 0);
+    if (typeof queueUsage === 'function') setTimeout(() => queueUsage(w), 0);
     day().added = todayAdded();
     save();
     render();
@@ -825,6 +833,7 @@
     if (mode === 'cloze' && !exW) mode = 'reverse';
     w.lastMode = mode;
     touch(w);
+    hideUsageFor(w);
     current = { w, mode, ex, revealed: false, started: Date.now() };
     setMood('talking', 1200);
     if (mode === 'cloze') {
@@ -967,6 +976,7 @@
     const shownEx = current.ex || null;
     logEvent('quiz', { mode: current.mode, de: fullDe(w), tr: w.tr, ok, answer: current.input || (ok ? '(bildim)' : '(bilemedim)'), expected: current.answer });
     const now = Date.now();
+    showUsage(w); // ikinci çalışan aynı anda kullanım kartını gösterir
     let q = quality(ok, note, now - (current.started || now), current.mode);
     if (ok && current.hinted) q = Math.min(q, 3); // ipucu aldıysan "zor" sayılır
     const advanced = review(w, q);
@@ -1191,6 +1201,7 @@
     logEvent('accepted_suggestion', { de: (pendingNew.art ? pendingNew.art + ' ' : '') + pendingNew.de, tr: pendingNew.tr });
     const w = addWord(pendingNew);
     pendingNew = null;
+    showUsage(w);
     setMood('happy', 1800);
     showBubble(`${wordCard(w, 'steht im Heft ✓ ich frage dich oft')}<div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 9000 });
     if (state.settings.voice === 'on') say(fullDe(w));
@@ -1277,6 +1288,173 @@
     if (w) ensureImage(w);
   }
 
+  /* ---------- ikinci çalışan: kullanım uzmanı ---------- */
+  // Kelimenin cevabı ortaya çıkınca, nasıl ve hangi bağlamda kullanıldığını kendi kartında gösterir.
+  // Bilgi kelime başına bir kez üretilir, kelimeyle birlikte saklanır ve senkronlanır.
+  const bubble2 = $('bubble2');
+  const usageQueue = [];
+  const usageFails = new Map();
+  let usageBusy = false, usageNextAt = 0, usageTotal = 0, usageDone = 0;
+  let usageShownId = null, usageExpanded = false, pendingUsageWord = null;
+  const hasUsage = (w) => !!(w && w.usage && Array.isArray(w.usage.collocations));
+  const isNarrow = () => stage.clientWidth < 700;
+
+  function cleanUsage(it) {
+    const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    const arr = (v, n, m) => (Array.isArray(v) ? v.map((x) => str(x, m)).filter(Boolean).slice(0, n) : []);
+    return {
+      pattern: str(it.pattern, 120),
+      collocations: arr(it.collocations, 6, 60),
+      examples: (Array.isArray(it.examples) ? it.examples : []).map((e) => ({ de: str(e && e.de, 160), tr: str(e && e.tr, 160) })).filter((e) => e.de).slice(0, 3),
+      synonyms: arr(it.synonyms, 3, 40),
+      opposite: str(it.opposite, 40),
+      context_de: str(it.context_de, 220),
+      context_tr: str(it.context_tr, 220),
+    };
+  }
+  function queueUsage(w, priority) {
+    if (!w || hasUsage(w)) return;
+    const i = usageQueue.indexOf(w);
+    if (i >= 0) usageQueue.splice(i, 1);
+    if (priority) usageQueue.unshift(w); else usageQueue.push(w);
+  }
+  function backfillUsage() {
+    state.words.forEach((w) => { if (!hasUsage(w) && (usageFails.get(w.id) || 0) < 3 && !usageQueue.includes(w)) usageQueue.push(w); });
+  }
+  async function pumpUsage() {
+    if (usageBusy || !usageQueue.length || Date.now() < usageNextAt || !window.AI || !isActive()) return;
+    const batch = usageQueue.splice(0, 8).filter((w) => state.words.includes(w) && !hasUsage(w));
+    if (!batch.length) return;
+    usageBusy = true;
+    const bulk = batch.length > 1 || usageQueue.length > 0;
+    if (bulk) {
+      if (!usageTotal) { usageTotal = batch.length + usageQueue.length; usageDone = 0; }
+      scene.setMood2('batch');
+      scene.progress2 = usageDone / usageTotal;
+      showUsageProgress();
+    } else scene.setMood2('search');
+    try {
+      const items = await AI.usage(batch.map((w) => ({ id: w.id, de: w.de, art: w.art || '', tr: w.tr || '', pos: w.pos || '' })));
+      const byId = new Map(items.map((it) => [String(it.id), it]));
+      batch.forEach((w) => {
+        const it = byId.get(w.id);
+        const u = it ? cleanUsage(it) : null;
+        if (u && (u.collocations.length || u.examples.length)) w.usage = u;
+        else usageFails.set(w.id, (usageFails.get(w.id) || 0) + 1);
+      });
+      save();
+    } catch (e) {
+      batch.forEach((w) => usageFails.set(w.id, (usageFails.get(w.id) || 0) + 1));
+      usageNextAt = Date.now() + 20000;
+    }
+    usageBusy = false;
+    if (bulk) {
+      usageDone += batch.length;
+      scene.progress2 = Math.min(1, usageDone / (usageTotal || 1));
+      if (usageQueue.length) showUsageProgress();
+      else {
+        usageTotal = 0;
+        if (!usageShownId) { bubble2.hidden = true; think('meine Kollegin hat jetzt zu jedem Wort eine Karte ✓', 5000); }
+      }
+    }
+    if (!usageQueue.length && !state.paused) scene.setMood2('type');
+    if (pendingUsageWord && hasUsage(pendingUsageWord)) { const w = pendingUsageWord; pendingUsageWord = null; showUsage(w); }
+  }
+  function showUsageProgress() {
+    if (usageShownId) return;
+    bubble2.innerHTML = `<div class="b-inner"><div class="u-tag">Ich schreibe Karten zu deinen Wörtern… <b>${usageDone}/${usageTotal}</b></div></div>`;
+    bubble2.classList.add('compact');
+    bubble2.hidden = false;
+    placeBubble2();
+  }
+
+  /** Cevap ortaya çıkınca: kelimenin kullanım kartını göster */
+  function showUsage(w) {
+    if (!w) return;
+    if (!hasUsage(w)) { pendingUsageWord = w; queueUsage(w, true); scene.setMood2('search'); return; }
+    usageShownId = w.id;
+    renderUsage(w);
+    scene.setMood2('present');
+    setTimeout(() => { if (scene.mood2 === 'present') scene.setMood2(usageQueue.length ? 'batch' : 'type'); }, 2600);
+  }
+  function renderUsage(w) {
+    const u = w.usage;
+    const compact = isNarrow() && !usageExpanded;
+    let html;
+    if (compact) {
+      html = `<div class="u-tag">So benutzt man <b>${esc(fullDe(w))}</b> ▸</div>`;
+    } else {
+      const ex = u.examples.map((e) => `<li>${highlight(e.de, w.de) || esc(e.de)}${e.tr ? `<span class="tr">${esc(e.tr)}</span>` : ''}</li>`).join('');
+      const syn = u.synonyms.length ? `<span>ähnlich:</span> ${esc(u.synonyms.join(', '))}` : '';
+      const opp = u.opposite ? `${syn ? ' · ' : ''}<span>Gegenteil:</span> ${esc(u.opposite)}` : '';
+      html = `<div class="u-tag">So benutzt man <b>${esc(fullDe(w))}</b></div>
+        ${u.pattern ? `<div class="u-pat">${esc(u.pattern)}</div>` : ''}
+        ${u.collocations.length ? `<div class="u-chips">${u.collocations.map((c) => `<span>${esc(c)}</span>`).join('')}</div>` : ''}
+        ${ex ? `<ol class="u-ex">${ex}</ol>` : ''}
+        ${syn || opp ? `<div class="u-row">${syn}${opp}</div>` : ''}
+        ${u.context_de ? `<div class="u-row"><span>Wann?</span> ${esc(u.context_de)}${u.context_tr ? `<span class="tr">${esc(u.context_tr)}</span>` : ''}</div>` : ''}
+        ${isNarrow() ? '<div class="b-actions"><button class="btn sm" data-act="u-close">zu</button></div>' : ''}`;
+    }
+    bubble2.classList.remove('show-tr');
+    bubble2.classList.toggle('compact', compact);
+    bubble2.innerHTML = `<div class="b-inner">${html}</div>`;
+    if (!compact && bubble2.querySelector('.tr')) bubble2.firstElementChild.insertAdjacentHTML('afterbegin', '<button class="tr-toggle" data-act="tr" aria-label="Türkçe çeviri">TR</button>');
+    bubble2.hidden = false;
+    placeBubble2();
+  }
+  /** Soru bu kelimeyi soruyorsa kartı gizle (cevabı ele vermesin) */
+  function hideUsageFor(w) {
+    if (w && usageShownId === w.id) { bubble2.hidden = true; usageShownId = null; usageExpanded = false; }
+  }
+  function placeBubble2() {
+    if (bubble2.hidden) return;
+    const a = scene.headAnchor2();
+    const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    const hx = a ? cr.left - sr.left + a.x : sr.width - 24;
+    const hy = a ? cr.top - sr.top + a.y : cr.top - sr.top + 40;
+    const bw = bubble2.offsetWidth;
+    let left = hx - bw * 0.55;
+    // ana balonla çakışmasın
+    // ana balonun gerçek yerleşimi (açılış animasyonundan etkilenmeyen ölçü)
+    const mb = bubble.hidden ? null : { l: bubble.offsetLeft, t: bubble.offsetTop, r: bubble.offsetLeft + bubble.offsetWidth, b: bubble.offsetTop + bubble.offsetHeight };
+    if (mb) left = Math.max(left, mb.r + 10);
+    left = Math.max(8, Math.min(left, sr.width - bw - 8));
+    bubble2.style.left = left + 'px';
+    bubble2.style.bottom = (sr.height - hy + 14) + 'px';
+    bubble2.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
+    bubble2.classList.remove('floating');
+    // dar ekranda ana balonla çakışırsa onun üstüne çık (kuyruksuz)
+    if (mb) {
+      const b2 = { l: bubble2.offsetLeft, t: bubble2.offsetTop, r: bubble2.offsetLeft + bubble2.offsetWidth, b: bubble2.offsetTop + bubble2.offsetHeight };
+      const overlap = !(b2.r < mb.l || b2.l > mb.r || b2.b < mb.t || b2.t > mb.b);
+      if (overlap) {
+        bubble2.style.bottom = (stage.clientHeight - mb.t + 8) + 'px';
+        bubble2.classList.add('floating');
+      }
+    }
+    const inner = bubble2.firstElementChild;
+    const cardTop = $('card').getBoundingClientRect().top;
+    if (inner) {
+      const maxH = Math.max(120, sr.top - cardTop + hy - 54);
+      inner.classList.remove('scrolls');
+      inner.style.maxHeight = '';
+      if (inner.scrollHeight > maxH + 4) { inner.style.maxHeight = maxH + 'px'; inner.classList.add('scrolls'); }
+    }
+  }
+  bubble2.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (b && b.dataset.act === 'tr') { bubble2.classList.toggle('show-tr'); placeBubble2(); return; }
+    if (b && b.dataset.act === 'u-close') { usageExpanded = false; const w = state.words.find((x) => x.id === usageShownId); if (w) renderUsage(w); return; }
+    if (bubble2.classList.contains('compact') && usageShownId) {
+      // dar ekranda: dokununca aç, okurken soru gelmesin
+      usageExpanded = true;
+      nextReviewAt = Date.now() + 25000;
+      const w = state.words.find((x) => x.id === usageShownId);
+      if (w) renderUsage(w);
+    }
+  });
+  window.addEventListener('resize', placeBubble2);
+
   /* ---------- kitap: kelimeye dokun → anlamı, deftere ekle ---------- */
   let readerQuietUntil = 0;
   let pendingBook = null;
@@ -1310,6 +1488,7 @@
     setMood('talking', 1500);
     if (known) {
       pendingBook = null;
+      showUsage(known);
       showBubble(`${wordCard(known, 'aus deinem Buch · kennen wir schon ✓', { ex, mark: word })}
         <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 20000, focus: false });
       if (known.ex !== ex) { addToPool(known, ex.de, ex.tr); save(); }
@@ -1324,6 +1503,7 @@
     if (!pendingBook) return hideBubble();
     const w = addWord(pendingBook);
     logEvent('book_word_added', { de: fullDe(w), tr: w.tr });
+    showUsage(w);
     pendingBook = null;
     setMood('happy', 1800);
     showBubble(`${wordCard(w, 'steht im Heft ✓ ich frage dich oft')}<div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 8000, focus: false });
@@ -1481,6 +1661,7 @@
       scene.setMood('sleep');
     } else {
       setMood('happy', 1200);
+      scene.setMood2('type');
       nextReviewAt = Date.now() + 8000;
     }
   });
@@ -1514,7 +1695,7 @@
 
   setInterval(() => {
     const now = Date.now();
-    if (state.paused) { scene.setMood('sleep'); return; }
+    if (state.paused) { scene.setMood('sleep'); scene.setMood2('sleep'); return; }
     if (!isActive()) { if (!dormant) fallAsleep(); return; } // bakmıyorsan hiçbir şey çağrılmaz
     if (busy) return;
     if (!bubbleKind && now < readerQuietUntil && now > moodUntil) {
@@ -1536,6 +1717,8 @@
     }
     refillQueue();
     pumpImages();
+    pumpUsage();
+    if (now % 10000 < 1000) backfillUsage();
     backfillImages();
     if (now % 15000 < 1000) maybeUpdateProfile();
     // senkron: değişiklik varsa 45 sn'de bir, yoksa 4 dk'da bir (diğer cihazdan gelenler için)
@@ -1546,11 +1729,13 @@
   function fallAsleep() {
     dormant = true;
     scene.setMood('sleep');
+    scene.setMood2('sleep');
     if (!document.hidden && bubble.hidden) think('ich mache ein kleines Nickerchen… tipp mich an', 12000);
   }
   function wakeUp() {
     dormant = false;
     if (state.paused) return;
+    scene.setMood2('type');
     hideThought();
     setMood('happy', 1500);
     think(pick([`Da bist du ja${nameTag(', ')}! Weiter geht’s`, `Hallo${nameTag(' ')}! Ich habe auf dich gewartet`, 'Ich bin wach – los geht’s']), 4000);
@@ -1761,6 +1946,7 @@
     }, 1200);
   }
   if (state.sync.code) setTimeout(syncNow, 1500);
+  setTimeout(() => { if (typeof backfillUsage === 'function') backfillUsage(); }, 2500);
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
