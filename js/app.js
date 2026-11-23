@@ -2,9 +2,11 @@
 (function () {
   const STORE = 'kelime-defteri-v1';
   const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-  // Aralıklı tekrar seviyeleri (Leitner benzeri)
-  const INTERVALS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR, DAY, 3 * DAY, 7 * DAY, 16 * DAY, 35 * DAY, 90 * DAY, 180 * DAY];
+  // Aralıklı tekrar seviyeleri (Leitner benzeri; öğrenilmiş kelimeler en fazla 14 günde bir yine gelir)
+  const MAX_IVL = 14 * DAY;
+  const INTERVALS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR, DAY, 3 * DAY, 5 * DAY, 8 * DAY, 11 * DAY, MAX_IVL];
   const MASTERED = 5; // 3 gün aralığına ulaşan kelime "öğrenildi" sayılır
+  const isMastered = (w) => (w.ivl || 0) >= 3 * DAY * 0.95;
   // Akıllı tekrar (SM-2 benzeri): kolaylık puanı, öğrenme adımları, mezuniyet aralığı
   const LEARN_STEPS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR];
   const GRAD_IVL = DAY;
@@ -47,14 +49,18 @@
         s.sync = s.sync || { code: '', lastAt: 0, err: '' };
         s.settingsAt = s.settingsAt || 0;
         if (!s.deviceId) s.deviceId = Math.random().toString(36).slice(2, 10);
+        const now = Date.now();
         s.words.forEach((w) => {
           if (!Array.isArray(w.pool)) w.pool = w.ex ? [{ de: w.ex.de, tr: w.ex.tr || '', n: 0, last: 0 }] : [];
           if (!Array.isArray(w.asked)) w.asked = [];
           if (w.ease == null) {
-            const INT = [2, 10, 60, 300, 1440, 4320, 10080, 23040, 50400, 129600, 259200].map((m) => m * 60 * 1000);
+            const INT = [2, 10, 60, 300, 1440, 4320, 7200, 11520, 15840, 20160].map((m) => m * 60 * 1000);
             w.ease = 2.3; w.reps = w.level || 0; w.recentErr = 0;
             w.ivl = INT[Math.min(w.level || 0, INT.length - 1)];
           }
+          // önceden aylarca ileri atılmış kelimeleri üst sınıra çek ki unutulmasın
+          if (w.ivl > MAX_IVL) { w.ivl = MAX_IVL; w.level = levelFromIvl(w.ivl); }
+          if (w.due && w.due > now + MAX_IVL * 1.16) w.due = now + MAX_IVL * (0.55 + Math.random() * 0.45);
         });
         if (!Array.isArray(s.stories)) s.stories = [];
         s.worker2Muted = !!s.worker2Muted;
@@ -1042,7 +1048,7 @@
         w.ease = clampEase(w.ease + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)));
         if (w.reps < LEARN_STEPS.length) w.ivl = LEARN_STEPS[w.reps];
         else if (w.ivl < GRAD_IVL) w.ivl = GRAD_IVL;
-        else w.ivl = w.ivl * w.ease * (q === 3 ? 0.8 : q === 5 ? 1.15 : 1);
+        else w.ivl = Math.min(MAX_IVL, w.ivl * Math.min(w.ease, 1.9) * (q === 3 ? 0.8 : q === 5 ? 1.1 : 1));
         if (q >= 4) w.recentErr = Math.max(0, (w.recentErr || 0) - 1);
         advanced = true;
       }
@@ -1227,10 +1233,48 @@
       (it.answer && state.words.find((w) => T.key(w.de) === T.key(it.answer))) || null;
   }
 
+  let sinceRefresh = 0; // öğrenilmiş/eski kelime hatırlatmasından beri kaç soru geçti
+  const isOlderWord = (w) => isMastered(w) || (w.level || 0) >= 4;
+
+  /** Öğrenilmiş / eski kelimelerden en uzun süredir görülmeyeni seç (unutmayı önlemek için) */
+  function pickRefresher() {
+    const pool = state.words.filter((w) => isOlderWord(w) && !cooling(w));
+    if (!pool.length) return null;
+    const sorted = [...pool].sort((a, b) => (a.last || a.seenAt || 0) - (b.last || b.seenAt || 0));
+    return pick(sorted.slice(0, Math.min(3, sorted.length)));
+  }
+
+  /** Ekstra pratikte kelime seçimi: yeni/zor kelimeler önde ama eski kelimeler de makul aralıkla geri döner */
+  function pickPracticeWord(pool) {
+    const now = Date.now();
+    const pscore = (x) => {
+      const staleDays = Math.min(6, (now - (x.last || x.seenAt || 0)) / DAY);
+      return seenTodayOf(x) * 1.8 + Math.min(x.level || 0, 6) * 1.1 - difficulty(x) * 3.5 - staleDays * 1.2;
+    };
+    const top = [...pool].sort((a, b) => pscore(a) - pscore(b) || (a.seenAt || 0) - (b.seenAt || 0)).slice(0, 5);
+    return pick(top);
+  }
+
+  /** Öğrenilmiş kelimeleri arada (yaklaşık 4–5 soruda bir) tazeleme için seç */
+  function maybePickRefresher() {
+    if (sinceRefresh < 3) return null;
+    if (sinceRefresh < 5 && Math.random() >= 0.32) return null;
+    return pickRefresher();
+  }
+
+  function askWithRefreshTrack(w) {
+    if (!w) return;
+    sinceRefresh = isOlderWord(w) ? 0 : sinceRefresh + 1;
+    return startReview(w);
+  }
+
   function nextTalk() {
+    // 0) öğrenilmiş/eski kelimeleri unutmamak için her 4–5 soruda bir tazeleme
+    const refresh = maybePickRefresher();
+    if (refresh) return askWithRefreshTrack(refresh);
     // 1) zamanı gelen kelime (aralıklı tekrar)
     const due = dueWords().filter((w) => !cooling(w));
-    if (due.length) return startReview(due[0]);
+    if (due.length) return askWithRefreshTrack(due[0]);
     // 2) arada modelden yeni kelime önerisi ya da kısa bir sohbet satırı
     aiQueue = aiQueue.filter((it) => (it.type === 'new' || it.type === 'chat') && Date.now() - (it._t || 0) < 20 * MIN);
     if (aiQueue.length && (Math.random() < 0.12 || state.words.length < 3)) {
@@ -1239,14 +1283,10 @@
     }
     // 3) ekstra pratik: dinlenmiş bir kelimeyi resimli ya da Türkçe → Almanca sor
     const rested = state.words.filter((w) => !cooling(w));
-    if (rested.length) {
-      const pscore = (x) => seenTodayOf(x) + x.level * 3 - difficulty(x) * 4;
-      const w = pick([...rested].sort((a, b) => pscore(a) - pscore(b) || a.seenAt - b.seenAt).slice(0, 4));
-      return startReview(w);
-    }
+    if (rested.length) return askWithRefreshTrack(pickPracticeWord(rested));
     // hepsi yeni görüldüyse bile boş bekleme: en uzun süredir görülmeyeni sor (aynı kelime üst üste değil)
     const others = state.words.filter((w) => w.id !== lastWordId || state.words.length === 1);
-    if (others.length) return startReview([...others].sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0))[0]);
+    if (others.length) return askWithRefreshTrack([...others].sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0))[0]);
     if (state.words.length < 5) aiNextFetch = Math.min(aiNextFetch, Date.now() + 3000);
     nextReviewAt = Date.now() + 5000;
     idleThought();
@@ -2172,10 +2212,12 @@
         <div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 12000 });
       return;
     }
+    const refresh = maybePickRefresher();
+    if (refresh) return askWithRefreshTrack(refresh);
     const due = dueWords().filter((x) => !cooling(x));
     const rested = state.words.filter((x) => !cooling(x));
-    const w = due[0] || [...(rested.length ? rested : state.words)].sort((a, b) => a.level - b.level || a.last - b.last)[0];
-    startReview(w);
+    const w = due[0] || pickPracticeWord(rested.length ? rested : state.words);
+    askWithRefreshTrack(w);
   }
   $('askBtn').addEventListener('click', askNow);
   canvas.addEventListener('click', (e) => {
