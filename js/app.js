@@ -2,13 +2,16 @@
 (function () {
   const STORE = 'kelime-defteri-v1';
   const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-  // Aralıklı tekrar seviyeleri (Leitner benzeri; öğrenilmiş kelimeler en fazla 14 günde bir yine gelir)
-  const MAX_IVL = 14 * DAY;
-  const INTERVALS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR, DAY, 3 * DAY, 5 * DAY, 8 * DAY, 11 * DAY, MAX_IVL];
-  const MASTERED = 5; // 3 gün aralığına ulaşan kelime "öğrenildi" sayılır
+  // Aralıklı tekrar basamakları (3 dk'dan 90 güne kadar adım adım)
+  const INTERVALS = [
+    3 * MIN, 5 * MIN, 10 * MIN, HOUR, 4 * HOUR, 12 * HOUR,
+    DAY, 3 * DAY, 7 * DAY, 14 * DAY, 30 * DAY, 60 * DAY, 90 * DAY,
+  ];
+  const MAX_IVL = INTERVALS[INTERVALS.length - 1]; // 90 gün
+  const MASTERED = 7; // 3 gün aralığına ulaşan kelime "öğrenildi" sayılır
   const isMastered = (w) => (w.ivl || 0) >= 3 * DAY * 0.95;
-  // Akıllı tekrar (SM-2 benzeri): kolaylık puanı, öğrenme adımları, mezuniyet aralığı
-  const LEARN_STEPS = [2 * MIN, 10 * MIN, HOUR, 5 * HOUR];
+  // Basamak tabanlı tekrar parametreleri
+  const LEARN_STEPS = INTERVALS.slice(0, 6);
   const GRAD_IVL = DAY;
   const EASE0 = 2.3, EASE_MIN = 1.3, EASE_MAX = 3.0;
   const clampEase = (e) => Math.max(EASE_MIN, Math.min(EASE_MAX, e));
@@ -54,13 +57,12 @@
           if (!Array.isArray(w.pool)) w.pool = w.ex ? [{ de: w.ex.de, tr: w.ex.tr || '', n: 0, last: 0 }] : [];
           if (!Array.isArray(w.asked)) w.asked = [];
           if (w.ease == null) {
-            const INT = [2, 10, 60, 300, 1440, 4320, 7200, 11520, 15840, 20160].map((m) => m * 60 * 1000);
             w.ease = 2.3; w.reps = w.level || 0; w.recentErr = 0;
-            w.ivl = INT[Math.min(w.level || 0, INT.length - 1)];
+            w.ivl = INTERVALS[Math.min(w.level || 0, INTERVALS.length - 1)];
           }
-          // önceden aylarca ileri atılmış kelimeleri üst sınıra çek ki unutulmasın
-          if (w.ivl > MAX_IVL) { w.ivl = MAX_IVL; w.level = levelFromIvl(w.ivl); }
-          if (w.due && w.due > now + MAX_IVL * 1.16) w.due = now + MAX_IVL * (0.55 + Math.random() * 0.45);
+          if (w.ivl > MAX_IVL) w.ivl = MAX_IVL;
+          w.level = levelFromIvl(w.ivl);
+          if (w.due && w.due > now + MAX_IVL * 1.12) w.due = now + MAX_IVL;
         });
         if (!Array.isArray(s.stories)) s.stories = [];
         s.worker2Muted = !!s.worker2Muted;
@@ -1025,42 +1027,50 @@
   }
 
   /**
-   * Akıllı tekrar. Aralık sadece tekrar zamanı gelmiş kelimede ilerler; arada yapılan
-   * pratik aralığı ilerletmez ama hata yapılırsa tekrarı öne çeker ve kelimeyi "zor" yapar.
+   * 90 günlük basamaklı aralıklı tekrar:
+   * 3dk → 5dk → 10dk → 1sa → 4sa → 12sa → 1g → 3g → 7g → 14g → 30g → 60g → 90g.
+   * Zamanı gelen kelimeyi doğru bilince bir sonraki basamağa geçer; hata yapılırsa
+   * aynı seviyede ve aynı sürede kalır (uzamaz, bir sonraki seviyeye geçemez).
    */
   function review(w, q) {
     const now = Date.now();
     const wasDue = w.due <= now + 30 * 1000;
     let advanced = false;
     w.ease = w.ease || EASE0;
-    w.ivl = w.ivl || LEARN_STEPS[0];
+    const curLevel = Math.max(0, Math.min(INTERVALS.length - 1, levelFromIvl(w.ivl || INTERVALS[0])));
+    w.ivl = INTERVALS[curLevel];
     w.reviews++;
     w.last = now;
     if (q >= 3) w.correct++;
     else { w.lapses++; w.recentErr = Math.min(5, (w.recentErr || 0) + 1); }
+
     if (wasDue) {
       if (q < 3) {
-        w.reps = 0;
-        w.ease = clampEase(w.ease - 0.2);
-        w.ivl = LEARN_STEPS[0];
+        // Hata: aynı seviyede ve aynı sürede kalır, bir sonraki seviyeye geçmez
+        w.ease = clampEase(w.ease - 0.15);
+        w.level = curLevel;
+        w.ivl = INTERVALS[curLevel];
+        w.due = now + w.ivl;
       } else {
         w.reps = (w.reps || 0) + 1;
         w.ease = clampEase(w.ease + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)));
-        if (w.reps < LEARN_STEPS.length) w.ivl = LEARN_STEPS[w.reps];
-        else if (w.ivl < GRAD_IVL) w.ivl = GRAD_IVL;
-        else w.ivl = Math.min(MAX_IVL, w.ivl * Math.min(w.ease, 1.9) * (q === 3 ? 0.8 : q === 5 ? 1.1 : 1));
+        const nextLevel = Math.min(INTERVALS.length - 1, curLevel + 1);
+        w.level = nextLevel;
+        w.ivl = INTERVALS[nextLevel];
         if (q >= 4) w.recentErr = Math.max(0, (w.recentErr || 0) - 1);
-        advanced = true;
+        advanced = nextLevel > curLevel;
+        w.due = now + w.ivl * (0.94 + Math.random() * 0.12);
       }
-      w.due = now + w.ivl * (0.92 + Math.random() * 0.16);
     } else if (q < 3) {
-      w.ease = clampEase(w.ease - 0.15);
-      if (w.ivl > HOUR) w.ivl = Math.max(HOUR, w.ivl / 2);
-      w.due = Math.min(w.due, now + 10 * MIN);
-    } else if (q === 5) {
-      w.ease = clampEase(w.ease + 0.02);
+      // Erken pratikte/tazelemede hata: aynı seviyede ve aynı sürede kalır, uzamaz
+      w.ease = clampEase(w.ease - 0.1);
+      w.level = curLevel;
+      w.ivl = INTERVALS[curLevel];
+      w.due = Math.min(w.due, now + w.ivl);
+    } else {
+      w.level = curLevel;
+      if (q === 5) w.ease = clampEase(w.ease + 0.02);
     }
-    w.level = levelFromIvl(w.ivl);
     const d = day();
     d.reviewed++;
     if (q >= 3) d.correct++;
@@ -1233,60 +1243,68 @@
       (it.answer && state.words.find((w) => T.key(w.de) === T.key(it.answer))) || null;
   }
 
-  let sinceRefresh = 0; // öğrenilmiş/eski kelime hatırlatmasından beri kaç soru geçti
-  const isOlderWord = (w) => isMastered(w) || (w.level || 0) >= 4;
+  let sinceRefresh = 0; // öğrenilmiş kelime tazelemesinden beri kaç soru geçti
 
-  /** Öğrenilmiş / eski kelimelerden en uzun süredir görülmeyeni seç (unutmayı önlemek için) */
+  /** Öğrenilmiş kelimelerden en uzun süredir görülmeyeni seç (nadiren tazeleme için) */
   function pickRefresher() {
-    const pool = state.words.filter((w) => isOlderWord(w) && !cooling(w));
+    const pool = state.words.filter((w) => isMastered(w) && !cooling(w));
     if (!pool.length) return null;
     const sorted = [...pool].sort((a, b) => (a.last || a.seenAt || 0) - (b.last || b.seenAt || 0));
     return pick(sorted.slice(0, Math.min(3, sorted.length)));
   }
 
-  /** Ekstra pratikte kelime seçimi: yeni/zor kelimeler önde ama eski kelimeler de makul aralıkla geri döner */
+  /** Ekstra pratikte ağırlık yeni/öğrenilmekte olan kelimelerde; hepsi öğrenilmişse eskilerden seç */
   function pickPracticeWord(pool) {
-    const now = Date.now();
-    const pscore = (x) => {
-      const staleDays = Math.min(6, (now - (x.last || x.seenAt || 0)) / DAY);
-      return seenTodayOf(x) * 1.8 + Math.min(x.level || 0, 6) * 1.1 - difficulty(x) * 3.5 - staleDays * 1.2;
-    };
-    const top = [...pool].sort((a, b) => pscore(a) - pscore(b) || (a.seenAt || 0) - (b.seenAt || 0)).slice(0, 5);
+    const learning = pool.filter((x) => !isMastered(x));
+    const src = learning.length ? learning : pool;
+    const pscore = (x) => seenTodayOf(x) + (x.level || 0) * 2.5 - difficulty(x) * 3.5;
+    const top = [...src].sort((a, b) => pscore(a) - pscore(b) || (a.seenAt || 0) - (b.seenAt || 0)).slice(0, 4);
     return pick(top);
   }
 
-  /** Öğrenilmiş kelimeleri arada (yaklaşık 4–5 soruda bir) tazeleme için seç */
+  /** Zamanı gelmiş kelimelerde yeni/öğrenilmekte olanlara öncelik ver */
+  function pickDueWord(due) {
+    if (!due.length) return null;
+    const freshDue = due.filter((w) => !isMastered(w));
+    return freshDue.length ? freshDue[0] : due[0];
+  }
+
+  /** Öğrenilmiş kelimeleri gerçekten nadiren (yaklaşık 8–10 soruda bir) tazeleme olarak getir */
   function maybePickRefresher() {
-    if (sinceRefresh < 3) return null;
-    if (sinceRefresh < 5 && Math.random() >= 0.32) return null;
+    if (sinceRefresh < 7) return null;
+    if (sinceRefresh < 10 && Math.random() >= 0.35) return null;
     return pickRefresher();
   }
 
   function askWithRefreshTrack(w) {
     if (!w) return;
-    sinceRefresh = isOlderWord(w) ? 0 : sinceRefresh + 1;
+    sinceRefresh = isMastered(w) ? 0 : sinceRefresh + 1;
     return startReview(w);
   }
 
   function nextTalk() {
-    // 0) öğrenilmiş/eski kelimeleri unutmamak için her 4–5 soruda bir tazeleme
+    // 0) öğrenilmiş kelimeleri unutmamak için nadiren (~8–10 soruda bir) tazeleme
     const refresh = maybePickRefresher();
     if (refresh) return askWithRefreshTrack(refresh);
-    // 1) zamanı gelen kelime (aralıklı tekrar)
+    // 1) zamanı gelen kelime (önce yeni/öğrenilmekte olanlar, sonra eski kelimeler)
     const due = dueWords().filter((w) => !cooling(w));
-    if (due.length) return askWithRefreshTrack(due[0]);
+    if (due.length) return askWithRefreshTrack(pickDueWord(due));
     // 2) arada modelden yeni kelime önerisi ya da kısa bir sohbet satırı
     aiQueue = aiQueue.filter((it) => (it.type === 'new' || it.type === 'chat') && Date.now() - (it._t || 0) < 20 * MIN);
     if (aiQueue.length && (Math.random() < 0.12 || state.words.length < 3)) {
       const it = aiQueue.shift();
       if (showAiItem(it)) return;
     }
-    // 3) ekstra pratik: dinlenmiş bir kelimeyi resimli ya da Türkçe → Almanca sor
+    // 3) ekstra pratik: ağırlık yeni/öğrenilmekte olan kelimelerde
     const rested = state.words.filter((w) => !cooling(w));
     if (rested.length) return askWithRefreshTrack(pickPracticeWord(rested));
-    // hepsi yeni görüldüyse bile boş bekleme: en uzun süredir görülmeyeni sor (aynı kelime üst üste değil)
+    // hepsi yeni görüldüyse bile boş bekleme: yine önce yeni/öğrenilmekte olanlardan seç
     const others = state.words.filter((w) => w.id !== lastWordId || state.words.length === 1);
-    if (others.length) return askWithRefreshTrack([...others].sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0))[0]);
+    if (others.length) {
+      const learning = others.filter((w) => !isMastered(w));
+      const src = learning.length ? learning : others;
+      return askWithRefreshTrack([...src].sort((a, b) => (a.seenAt || 0) - (b.seenAt || 0))[0]);
+    }
     if (state.words.length < 5) aiNextFetch = Math.min(aiNextFetch, Date.now() + 3000);
     nextReviewAt = Date.now() + 5000;
     idleThought();
@@ -2216,7 +2234,7 @@
     if (refresh) return askWithRefreshTrack(refresh);
     const due = dueWords().filter((x) => !cooling(x));
     const rested = state.words.filter((x) => !cooling(x));
-    const w = due[0] || pickPracticeWord(rested.length ? rested : state.words);
+    const w = pickDueWord(due) || pickPracticeWord(rested.length ? rested : state.words);
     askWithRefreshTrack(w);
   }
   $('askBtn').addEventListener('click', askNow);
