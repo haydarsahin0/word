@@ -1497,25 +1497,18 @@
   });
   window.addEventListener('resize', placeBubble2);
 
-  /* ---------- üçüncü çalışan: metin yazarı (seçilen kelimelerle rastgele konuda metin) ---------- */
+  /* ---------- üçüncü çalışan: kafasının üstündeki baloncukla metin yazarı ---------- */
   const bubble3 = $('bubble3');
-  const storyWrap = $('storyWrap');
-  const storyPicker = $('storyPicker');
-  const storySearch = $('storySearch');
-  const storyChips = $('storyChips');
-  const storyExtra = $('storyExtra');
-  const storyCount = $('storyCount');
-  const storyWriteBtn = $('storyWriteBtn');
-  const storyOut = $('storyOut');
-  const storyHist = $('storyHist');
   const storySelected = new Set(); // seçili kelime id'leri
   let storyBusy = false;
   let activeStory = null;
-  let storyPickerCollapsed = false;
+  let storyMode = 'pick'; // 'pick' | 'story' | 'history'
   let storyErr = '';
+  let storySearchVal = '';
+  let storyExtraVal = '';
 
   function parseExtraWords() {
-    return (storyExtra.value || '')
+    return (storyExtraVal || '')
       .split(/[,;\n]+/)
       .map((x) => x.trim())
       .filter(Boolean)
@@ -1562,7 +1555,6 @@
     targets.forEach((w) => {
       if (!w.de) return;
       exactMap.set(w.de.toLowerCase(), w);
-      // çok kelimeli girişlerde anlamlı parçaları da eşleştir
       w.de.split(/\s+/).filter((p) => p.length >= 4).forEach((p) => {
         if (!exactMap.has(p.toLowerCase())) exactMap.set(p.toLowerCase(), w);
       });
@@ -1609,13 +1601,6 @@
       .join('');
   }
 
-  function showBubble3(html) {
-    if (!html) { bubble3.hidden = true; return; }
-    bubble3.innerHTML = `<div class="b-inner">${html}</div>`;
-    bubble3.hidden = false;
-    placeBubble3();
-  }
-
   function placeBubble3() {
     if (bubble3.hidden) return;
     const a = scene.headAnchor3();
@@ -1623,141 +1608,172 @@
     const hx = a ? cr.left - sr.left + a.x : sr.width - 24;
     const hy = a ? cr.top - sr.top + a.y : cr.top - sr.top + 40;
     const bw = bubble3.offsetWidth;
-    const left = Math.max(8, Math.min(hx - bw * 0.65, sr.width - bw - 8));
+    const left = Math.max(8, Math.min(hx - bw * 0.78, sr.width - bw - 8));
     bubble3.style.left = left + 'px';
     bubble3.style.bottom = (sr.height - hy + 14) + 'px';
     bubble3.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
-    bubble3.classList.remove('floating');
-    // diğer balonlarla çakışırsa kuyruksuz üstte dur
-    const b3 = { l: bubble3.offsetLeft, t: bubble3.offsetTop, r: bubble3.offsetLeft + bubble3.offsetWidth, b: bubble3.offsetTop + bubble3.offsetHeight };
-    for (const other of [bubble, bubble2]) {
-      if (other.hidden) continue;
-      const o = { l: other.offsetLeft, t: other.offsetTop, r: other.offsetLeft + other.offsetWidth, b: other.offsetTop + other.offsetHeight };
-      if (!(b3.r < o.l || b3.l > o.r || b3.b < o.t || b3.t > o.b)) {
-        bubble3.style.bottom = (stage.clientHeight - o.t + 8) + 'px';
-        bubble3.classList.add('floating');
-        break;
-      }
+    bubble3.classList.toggle('floating', !a);
+    const inner = bubble3.firstElementChild;
+    const cardTop = $('card').getBoundingClientRect().top;
+    if (inner) {
+      const maxH = Math.max(160, sr.top - cardTop + hy - 28);
+      inner.classList.remove('scrolls');
+      inner.style.maxHeight = '';
+      if (inner.scrollHeight > maxH + 4) { inner.style.maxHeight = maxH + 'px'; inner.classList.add('scrolls'); }
     }
   }
-  bubble3.addEventListener('click', () => { openStory(); });
   window.addEventListener('resize', placeBubble3);
 
-  function renderStoryPicker() {
-    // silinmiş kelimeleri seçimden temizle
+  function buildChipsHtml() {
     const validIds = new Set(state.words.map((w) => w.id));
     [...storySelected].forEach((id) => { if (!validIds.has(id)) storySelected.delete(id); });
-
-    const q = (storySearch.value || '').trim().toLowerCase();
+    const q = (storySearchVal || '').trim().toLowerCase();
     const list = [...state.words].reverse().filter((w) => !q || w.de.toLowerCase().includes(q) || (w.tr || '').toLowerCase().includes(q));
-    if (!state.words.length) {
-      storyChips.innerHTML = '<div class="st-empty">Defterinde henüz kelime yok — aşağıya virgülle birkaç Almanca kelime yazabilirsin.</div>';
-    } else if (!list.length) {
-      storyChips.innerHTML = '<div class="st-empty">Eşleşen kelime bulunamadı.</div>';
-    } else {
-      storyChips.innerHTML = list.map((w) => {
-        const on = storySelected.has(w.id);
-        return `<button type="button" class="st-chip${on ? ' on' : ''}" data-sid="${esc(w.id)}"><i>${esc(fullDe(w))}</i><small>${esc(w.tr)}</small></button>`;
-      }).join('');
-    }
+    if (!state.words.length) return '<div class="st-empty">Henüz kayıtlı kelime yok — aşağıya virgülle birkaç Almanca kelime yazabilirsin.</div>';
+    if (!list.length) return '<div class="st-empty">Eşleşen kelime bulunamadı.</div>';
+    return list.map((w) => {
+      const on = storySelected.has(w.id);
+      return `<button type="button" class="st-chip${on ? ' on' : ''}" data-sid="${esc(w.id)}"><i>${esc(fullDe(w))}</i><small>${esc(w.tr)}</small></button>`;
+    }).join('');
+  }
+
+  function updatePickerParts() {
+    const chips = bubble3.querySelector('#storyChips');
+    if (chips) chips.innerHTML = buildChipsHtml();
     const picked = collectSelectedWords();
     const n = picked.length;
-    storyCount.textContent = n ? `${n} kelime seçildi${n >= 15 ? ' (en fazla 15)' : ''}` : 'Metinde geçmesini istediğin kelimeleri seç';
-    storyWriteBtn.disabled = storyBusy || !n;
-    storyWriteBtn.textContent = storyBusy ? 'Yazıyor…' : (n ? `Metin yaz (${n})` : 'Metin yaz');
-    storyPicker.hidden = storyPickerCollapsed && !!activeStory && !storyBusy;
+    const cnt = bubble3.querySelector('#storyCount');
+    if (cnt) cnt.textContent = n ? `${n} kelime${n >= 15 ? ' (maks 15)' : ''}` : 'Kelime seç';
+    const wb = bubble3.querySelector('#storyWriteBtn');
+    if (wb) {
+      wb.disabled = storyBusy || !n;
+      wb.textContent = n ? `Metin yaz (${n})` : 'Metin yaz';
+    }
+    placeBubble3();
   }
 
-  function renderStoryOutput() {
+  function renderBubble3() {
+    const histCount = (state.stories || []).length;
+    bubble3.classList.remove('show-tr');
+    let html = '';
+
     if (storyBusy) {
-      storyOut.hidden = false;
-      storyOut.classList.remove('show-tr');
-      storyOut.innerHTML = '<div class="st-loading">Üçüncü çalışan rastgele bir konu seçip kelimelerinle metni yazıyor…</div>';
-      return;
-    }
-    if (storyErr) {
-      storyOut.hidden = false;
-      storyOut.classList.remove('show-tr');
-      storyOut.innerHTML = `<div class="st-err">${esc(storyErr)}</div>`;
-      return;
-    }
-    if (!activeStory) {
-      storyOut.hidden = true;
-      storyOut.innerHTML = '';
-      return;
-    }
-    const st = activeStory;
-    const words = Array.isArray(st.words) ? st.words : [];
-    const bodyHtml = renderUnderlinedStory(st.text_de, words);
-    const trHtml = (st.text_tr || '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join('');
-    storyOut.hidden = false;
-    storyOut.classList.remove('show-tr');
-    storyOut.innerHTML = `
-      <div class="st-meta">
-        <div class="st-topic">Konu: <b>${esc(st.topic_de || 'Zufälliges Thema')}</b>${st.topic_tr ? ` <span class="tr">(${esc(st.topic_tr)})</span>` : ''}</div>
-        <div class="st-tools">
-          <button type="button" class="btn sm" data-sact="listen" aria-label="Metni sesli dinle">▶ dinle</button>
-          ${trHtml ? '<button type="button" class="btn sm" data-sact="tr" aria-label="Türkçe çeviri">TR</button>' : ''}
+      const picked = collectSelectedWords();
+      html = `
+        <div class="st-head">
+          <div class="b-tag">Metin Yazarı</div>
+          <div class="st-head-tools"><button type="button" class="st-x" data-sact="close" aria-label="Kapat">×</button></div>
         </div>
-      </div>
-      ${st.title_de ? `<h3 class="st-title">${esc(st.title_de)}</h3>` : ''}
-      <div class="st-body">${bodyHtml}</div>
-      <div class="st-gloss" id="storyGloss">Altı çizili bir kelimeye dokun: sesli oku &amp; anlamı gör.</div>
-      ${trHtml ? `<div class="st-tr">${trHtml}</div>` : ''}
-      ${words.length ? `<div class="st-used">${words.map((w) => `<button type="button" data-sword="${esc((w.art ? w.art + ' ' : '') + w.de)}" data-str="${esc(w.tr || '')}">${esc((w.art ? w.art + ' ' : '') + w.de)}</button>`).join('')}</div>` : ''}
-      <div class="st-actions">
-        <button type="button" class="btn sm" data-sact="rewrite">Yeni konuyla tekrar yaz</button>
-        <button type="button" class="btn sm" data-sact="edit-words">${storyPickerCollapsed ? 'Kelimeleri değiştir' : 'Seçiciyi gizle'}</button>
-      </div>`;
-  }
-
-  function renderStoryHistory() {
-    const list = Array.isArray(state.stories) ? state.stories : [];
-    if (!list.length) { storyHist.hidden = true; storyHist.innerHTML = ''; return; }
-    storyHist.hidden = false;
-    storyHist.innerHTML = `<div class="list-head"><span>Son yazılan metinler</span><span class="muted">${list.length}</span></div>
-      <div class="st-hist-list">${list.map((st) => `
-        <div class="st-hist-item">
-          <button type="button" class="st-hist-open" data-sopen="${esc(st.id)}">
-            <b>${esc(st.title_de || st.topic_de || 'Metin')}</b>
-            <small>${esc((st.words || []).map((w) => w.de).join(', '))}</small>
-          </button>
-          <button type="button" class="st-hist-del" data-sdel="${esc(st.id)}" aria-label="Metni sil">×</button>
-        </div>`).join('')}</div>`;
-  }
-
-  function openStory() {
-    bubble3.hidden = true;
-    storyErr = '';
-    if (!activeStory && state.stories && state.stories.length && !storySelected.size) {
-      // daha önce metin varsa picker açık başlasın ki hemen yeni kelimeler seçilebilsin
-      storyPickerCollapsed = false;
+        <div class="st-loading">Rastgele bir konu seçip kelimelerinle metni yazıyorum…</div>
+        ${picked.length ? `<div class="st-used">${picked.map((w) => `<button type="button" data-sword="${esc((w.art ? w.art + ' ' : '') + w.de)}" data-str="${esc(w.tr || '')}">${esc((w.art ? w.art + ' ' : '') + w.de)}</button>`).join('')}</div>` : ''}`;
+    } else if (storyMode === 'story' && activeStory) {
+      const st = activeStory;
+      const words = Array.isArray(st.words) ? st.words : [];
+      const bodyHtml = renderUnderlinedStory(st.text_de, words);
+      const trHtml = (st.text_tr || '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join('');
+      html = `
+        <div class="st-head">
+          <div class="st-topic">Konu: <b>${esc(st.topic_de || 'Zufälliges Thema')}</b>${st.topic_tr ? ` <span class="tr">(${esc(st.topic_tr)})</span>` : ''}</div>
+          <div class="st-head-tools">
+            <button type="button" class="btn speak" data-sact="listen" aria-label="Metni sesli dinle">${speakerSvg}</button>
+            ${trHtml ? '<button type="button" class="tr-toggle" data-sact="tr" aria-label="Türkçe çeviri">TR</button>' : ''}
+            <button type="button" class="st-x" data-sact="close" aria-label="Kapat">×</button>
+          </div>
+        </div>
+        ${storyErr ? `<div class="st-err">${esc(storyErr)}</div>` : ''}
+        ${st.title_de ? `<h3 class="st-title">${esc(st.title_de)}</h3>` : ''}
+        <div class="st-body">${bodyHtml}</div>
+        <div class="st-gloss" id="storyGloss">Altı çizili kelimeye dokun: dinle &amp; anlamı gör.</div>
+        ${trHtml ? `<div class="st-tr tr">${trHtml}</div>` : ''}
+        ${words.length ? `<div class="st-used">${words.map((w) => `<button type="button" data-sword="${esc((w.art ? w.art + ' ' : '') + w.de)}" data-str="${esc(w.tr || '')}">${esc((w.art ? w.art + ' ' : '') + w.de)}</button>`).join('')}</div>` : ''}
+        <div class="st-actions">
+          <button type="button" class="btn sm" data-sact="rewrite">Yeni konu</button>
+          <button type="button" class="btn sm" data-sact="pick">Kelimeler</button>
+          ${histCount > 1 ? `<button type="button" class="btn sm" data-sact="history">Geçmiş (${histCount})</button>` : ''}
+        </div>`;
+    } else if (storyMode === 'history') {
+      const list = state.stories || [];
+      html = `
+        <div class="st-head">
+          <div class="b-tag">Son yazılan metinler (${list.length})</div>
+          <div class="st-head-tools">
+            <button type="button" class="btn sm" data-sact="pick">Yeni</button>
+            <button type="button" class="st-x" data-sact="close" aria-label="Kapat">×</button>
+          </div>
+        </div>
+        ${list.length ? `<div class="st-hist-list">${list.map((st) => `
+          <div class="st-hist-item">
+            <button type="button" class="st-hist-open" data-sopen="${esc(st.id)}">
+              <b>${esc(st.title_de || st.topic_de || 'Metin')}</b>
+              <small>${esc((st.words || []).map((w) => w.de).join(', '))}</small>
+            </button>
+            <button type="button" class="st-hist-del" data-sdel="${esc(st.id)}" aria-label="Metni sil">×</button>
+          </div>`).join('')}</div>` : '<div class="st-empty">Henüz kaydedilmiş metin yok.</div>'}`;
+    } else {
+      const picked = collectSelectedWords();
+      const n = picked.length;
+      html = `
+        <div class="st-head">
+          <div class="b-tag">Metin Yazarı · kelimelerini seç</div>
+          <div class="st-head-tools">
+            ${activeStory ? '<button type="button" class="btn sm" data-sact="show-story">Metin</button>' : ''}
+            ${histCount ? `<button type="button" class="btn sm" data-sact="history">Geçmiş</button>` : ''}
+            <button type="button" class="st-x" data-sact="close" aria-label="Kapat">×</button>
+          </div>
+        </div>
+        ${storyErr ? `<div class="st-err">${esc(storyErr)}</div>` : ''}
+        <div class="st-picker">
+          <div class="st-bar">
+            <input id="storySearch" type="search" placeholder="kelime ara…" autocomplete="off" value="${esc(storySearchVal)}">
+            <div class="st-quick">
+              <button class="btn sm" type="button" data-sact="rand">rastgele 5</button>
+              <button class="btn sm" type="button" data-sact="recent">son 5</button>
+              <button class="btn sm" type="button" data-sact="clear">temizle</button>
+            </div>
+          </div>
+          <div class="st-chips" id="storyChips">${buildChipsHtml()}</div>
+          <div class="st-custom">
+            <input id="storyExtra" type="text" placeholder="listede olmayan kelime ekle (virgülle)…" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(storyExtraVal)}">
+          </div>
+          <div class="st-foot">
+            <span class="muted" id="storyCount">${n ? `${n} kelime${n >= 15 ? ' (maks 15)' : ''}` : 'Kelime seç'}</span>
+            <button class="btn sm solid" id="storyWriteBtn" type="button" data-sact="write"${n ? '' : ' disabled'}>${n ? `Metin yaz (${n})` : 'Metin yaz'}</button>
+          </div>
+        </div>`;
     }
-    renderStoryPicker();
-    renderStoryOutput();
-    renderStoryHistory();
-    storyWrap.hidden = false;
+
+    bubble3.innerHTML = `<div class="b-inner">${html}</div>`;
+    bubble3.hidden = false;
     $('storyBtn').classList.add('on');
+    placeBubble3();
+  }
+
+  function openStory(mode) {
+    storyErr = '';
+    if (mode) storyMode = mode;
+    else if (!storyBusy) storyMode = storyMode === 'history' ? 'pick' : (activeStory ? 'story' : 'pick');
+    renderBubble3();
     readerQuietUntil = Date.now() + 60000;
   }
 
   function closeStory() {
-    storyWrap.hidden = true;
+    bubble3.hidden = true;
     $('storyBtn').classList.remove('on');
-    if (storyBusy) showBubble3('<div class="u-tag">Ich schreibe deine Geschichte…</div>');
+  }
+
+  function toggleStory() {
+    if (!bubble3.hidden) closeStory();
+    else openStory();
   }
 
   async function generateStory(reuseWords) {
     const words = reuseWords && reuseWords.length ? reuseWords : collectSelectedWords();
     if (!words.length || storyBusy) return;
-    if (!window.AI) { storyErr = 'AI istemcisi yüklenemedi.'; renderStoryOutput(); return; }
+    if (!window.AI) { storyErr = 'AI istemcisi yüklenemedi.'; renderBubble3(); return; }
     storyBusy = true;
     storyErr = '';
-    storyPickerCollapsed = false;
     scene.setMood3('write');
-    if (storyWrap.hidden) showBubble3('<div class="u-tag">Ich schreibe deine Geschichte…</div>');
-    renderStoryPicker();
-    renderStoryOutput();
+    renderBubble3();
     try {
       const avoidTopics = (state.stories || []).slice(0, 8).map((x) => x.topic_seed).filter(Boolean);
       const res = await AI.story(words.map((w) => ({ de: w.de, art: w.art || '', tr: w.tr || '' })), avoidTopics);
@@ -1773,71 +1789,52 @@
         text_tr: res.text_tr,
       };
       activeStory = entry;
+      storyMode = 'story';
       state.stories = [entry, ...(state.stories || [])].slice(0, 10);
       save();
-      storyPickerCollapsed = true;
       scene.setMood3('present');
       sfx('coin');
       setTimeout(() => { if (!state.paused && !storyBusy && scene.mood3 === 'present') scene.setMood3('idle'); }, 3500);
-      if (storyWrap.hidden) showBubble3('<div class="u-tag">Fertig! <b>Geschichte lesen ▸</b></div>');
     } catch (e) {
       const msg = String((e && e.message) || e || '');
       storyErr = msg === 'unknown_action'
         ? 'Cloudflare Worker henüz güncellenmemiş: cloudflare/worker.js dosyasını Cloudflare panelinde Deploy ettikten sonra tekrar dene.'
         : 'Metin şu an yazılamadı (' + (msg || 'bağlantı hatası') + '). Biraz sonra tekrar dene.';
+      storyMode = 'pick';
       scene.setMood3(state.paused ? 'sleep' : 'idle');
-      bubble3.hidden = true;
     } finally {
       storyBusy = false;
-      renderStoryPicker();
-      renderStoryOutput();
-      renderStoryHistory();
+      renderBubble3();
     }
   }
 
-  $('storyBtn').addEventListener('click', openStory);
-  $('closeStory').addEventListener('click', closeStory);
-  storyWrap.addEventListener('click', (e) => { if (e.target === storyWrap) closeStory(); });
-  storySearch.addEventListener('input', renderStoryPicker);
-  storyExtra.addEventListener('input', renderStoryPicker);
-  storyExtra.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); generateStory(); } });
+  $('storyBtn').addEventListener('click', toggleStory);
 
-  storyChips.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-sid]');
-    if (!b) return;
-    const id = b.dataset.sid;
-    if (storySelected.has(id)) storySelected.delete(id);
-    else if (collectSelectedWords().length < 15) storySelected.add(id);
-    renderStoryPicker();
+  bubble3.addEventListener('input', (e) => {
+    if (e.target.id === 'storySearch') { storySearchVal = e.target.value; updatePickerParts(); }
+    else if (e.target.id === 'storyExtra') { storyExtraVal = e.target.value; updatePickerParts(); }
   });
-
-  $('storyRand').addEventListener('click', () => {
-    storySelected.clear();
-    const pool = [...state.words].sort(() => Math.random() - 0.5).slice(0, 5);
-    pool.forEach((w) => storySelected.add(w.id));
-    renderStoryPicker();
+  bubble3.addEventListener('keydown', (e) => {
+    if (e.target.id === 'storyExtra' && e.key === 'Enter') { e.preventDefault(); generateStory(); }
   });
-  $('storyRecent').addEventListener('click', () => {
-    storySelected.clear();
-    state.words.slice(-5).forEach((w) => storySelected.add(w.id));
-    renderStoryPicker();
-  });
-  $('storyClear').addEventListener('click', () => {
-    storySelected.clear();
-    storyExtra.value = '';
-    renderStoryPicker();
-  });
-  storyWriteBtn.addEventListener('click', () => generateStory());
-
-  storyOut.addEventListener('click', (e) => {
+  bubble3.addEventListener('click', (e) => {
+    const sid = e.target.closest('[data-sid]');
+    if (sid) {
+      const id = sid.dataset.sid;
+      if (storySelected.has(id)) storySelected.delete(id);
+      else if (collectSelectedWords().length < 15) storySelected.add(id);
+      updatePickerParts();
+      return;
+    }
     const hit = e.target.closest('.st-hit');
     if (hit) {
       const w = hit.dataset.word || hit.textContent;
       const lbl = hit.dataset.label || w;
       const tr = hit.dataset.tr || '';
       say(w);
-      const g = $('storyGloss');
+      const g = bubble3.querySelector('#storyGloss');
       if (g) g.innerHTML = tr ? `<b>${esc(lbl)}</b> — ${esc(tr)}` : `<b>${esc(lbl)}</b>`;
+      placeBubble3();
       return;
     }
     const chip = e.target.closest('[data-sword]');
@@ -1845,50 +1842,53 @@
       const w = chip.dataset.sword;
       const tr = chip.dataset.str || '';
       say(w);
-      const g = $('storyGloss');
+      const g = bubble3.querySelector('#storyGloss');
       if (g) g.innerHTML = tr ? `<b>${esc(w)}</b> — ${esc(tr)}` : `<b>${esc(w)}</b>`;
+      placeBubble3();
       return;
     }
-    const b = e.target.closest('[data-sact]');
-    if (!b) return;
-    const act = b.dataset.sact;
-    if (act === 'tr') {
-      const on = storyOut.classList.toggle('show-tr');
-      b.classList.toggle('on', on);
-    } else if (act === 'listen' && activeStory) {
-      const plain = String(activeStory.text_de || '').replace(/\[\[|\]\]/g, '');
-      say((activeStory.title_de ? activeStory.title_de + '. ' : '') + plain);
-    } else if (act === 'rewrite' && activeStory) {
-      generateStory(activeStory.words);
-    } else if (act === 'edit-words') {
-      storyPickerCollapsed = !storyPickerCollapsed;
-      renderStoryPicker();
-      renderStoryOutput();
-    }
-  });
-
-  storyHist.addEventListener('click', (e) => {
     const del = e.target.closest('[data-sdel]');
     if (del) {
       const id = del.dataset.sdel;
       state.stories = (state.stories || []).filter((x) => x.id !== id);
-      if (activeStory && activeStory.id === id) { activeStory = null; storyPickerCollapsed = false; }
+      if (activeStory && activeStory.id === id) activeStory = state.stories[0] || null;
       save();
-      renderStoryPicker();
-      renderStoryOutput();
-      renderStoryHistory();
+      renderBubble3();
       return;
     }
     const open = e.target.closest('[data-sopen]');
     if (open) {
       const found = (state.stories || []).find((x) => x.id === open.dataset.sopen);
-      if (found) {
-        activeStory = found;
-        storyErr = '';
-        storyPickerCollapsed = true;
-        renderStoryPicker();
-        renderStoryOutput();
-      }
+      if (found) { activeStory = found; storyErr = ''; storyMode = 'story'; renderBubble3(); }
+      return;
+    }
+    const b = e.target.closest('[data-sact]');
+    if (!b) return;
+    const act = b.dataset.sact;
+    if (act === 'close') { closeStory(); }
+    else if (act === 'tr') { bubble3.classList.toggle('show-tr'); placeBubble3(); }
+    else if (act === 'listen' && activeStory) {
+      const plain = String(activeStory.text_de || '').replace(/\[\[|\]\]/g, '');
+      say((activeStory.title_de ? activeStory.title_de + '. ' : '') + plain);
+    } else if (act === 'write') { generateStory(); }
+    else if (act === 'rewrite' && activeStory) { generateStory(activeStory.words); }
+    else if (act === 'pick') { storyMode = 'pick'; storyErr = ''; renderBubble3(); }
+    else if (act === 'show-story' && activeStory) { storyMode = 'story'; renderBubble3(); }
+    else if (act === 'history') { storyMode = 'history'; renderBubble3(); }
+    else if (act === 'rand') {
+      storySelected.clear();
+      [...state.words].sort(() => Math.random() - 0.5).slice(0, 5).forEach((w) => storySelected.add(w.id));
+      updatePickerParts();
+    } else if (act === 'recent') {
+      storySelected.clear();
+      state.words.slice(-5).forEach((w) => storySelected.add(w.id));
+      updatePickerParts();
+    } else if (act === 'clear') {
+      storySelected.clear();
+      storyExtraVal = '';
+      const ex = bubble3.querySelector('#storyExtra');
+      if (ex) ex.value = '';
+      updatePickerParts();
     }
   });
 
@@ -2124,7 +2124,7 @@
   canvas.addEventListener('click', (e) => {
     const cr = canvas.getBoundingClientRect();
     const who = scene.workerAt ? scene.workerAt(e.clientX - cr.left) : 1;
-    if (who === 3) { sfx('reveal'); openStory(); return; }
+    if (who === 3) { sfx(bubble3.hidden ? 'reveal' : 'menuClose'); toggleStory(); return; }
     sfx('boop');
     if (!bubbleKind) askNow();
   });
@@ -2133,7 +2133,7 @@
   /** Balon kapanınca sıradaki soruyu hemen getir (1 sn'lik döngüyü beklemeden) */
   function tickTalk() {
     const now = Date.now();
-    if (state.paused || !isActive() || busy || bubbleKind || !storyWrap.hidden) return;
+    if (state.paused || !isActive() || busy || bubbleKind || !bubble3.hidden) return;
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
     if (typingNow || now < readerQuietUntil || now < nextReviewAt) return;
     nextTalk();
@@ -2155,7 +2155,7 @@
       scene.setMood('waiting');
     }
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
-    const reading = now < readerQuietUntil || !storyWrap.hidden; // okurken / metin yazarken kanka araya girmez
+    const reading = now < readerQuietUntil || !bubble3.hidden; // okurken / metin yazarken kanka araya girmez
     if (!bubbleKind && !typingNow && !reading && now >= nextReviewAt) {
       nextTalk();
     } else if (!bubbleKind && !typingNow && !reading && thought.hidden && now >= nextThoughtAt) {
@@ -2202,7 +2202,7 @@
   sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.hidden = true; });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (!storyWrap.hidden) closeStory();
+      if (!bubble3.hidden) closeStory();
       else if (!sheet.hidden) sheet.hidden = true;
       else if (bubbleKind && bubbleKind !== 'review') hideBubble();
     }
