@@ -56,13 +56,15 @@
             w.ivl = INT[Math.min(w.level || 0, INT.length - 1)];
           }
         });
+        if (!Array.isArray(s.stories)) s.stories = [];
+        s.worker2Muted = !!s.worker2Muted;
         return s;
       }
     } catch (e) { /* boş başla */ }
     return defaults();
   }
   function defaults() {
-    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar', engine: 'thorsten' }, paused: false };
+    return { words: [], days: {}, recent: [], log: [], cost: { days: {}, view: 'day' }, deleted: {}, sync: { code: '', lastAt: 0, err: '' }, settingsAt: 0, deviceId: Math.random().toString(36).slice(2, 10), profile: null, profileAt: 0, logAtProfile: 0, stories: [], worker2Muted: false, settings: { dailyGoal: 10, totalGoal: 500, freq: 'normal', voice: 'on', sfx: 'on', name: 'Haydar', engine: 'thorsten' }, paused: false };
   }
   let syncDirty = false;
   function save(markDirty = true) {
@@ -1387,12 +1389,46 @@
   const usageQueue = [];
   const usageFails = new Map();
   let usageBusy = false, usageNextAt = 0, usageTotal = 0, usageDone = 0;
-  let usageShownId = null, usageExpanded = false, pendingUsageWord = null;
+  let usageShownId = null, usageExpanded = false, pendingUsageWord = null, lastUsageWord = null;
+  let worker2NoticeTimer = 0;
   // fiil mi? (sözlük türü 'v' ya da artikelsiz, -en/-ern/-eln ile biten küçük harfli kelime)
   const isVerb = (w) => w.pos === 'v' || (!w.pos && !w.art && /^[a-zäöüß]+(en|ern|eln)$/.test(w.de || ''));
   // fiillerde çekim satırı da olmalı (eski kartlar bir kez yeniden hazırlanır)
   const hasUsage = (w) => !!(w && w.usage && Array.isArray(w.usage.collocations) && (!isVerb(w) || 'forms' in w.usage));
   const isNarrow = () => stage.clientWidth < 700;
+
+  /** Ortadaki çalışanı sustur / tekrar aç */
+  function toggleWorker2() {
+    clearTimeout(worker2NoticeTimer);
+    state.worker2Muted = !state.worker2Muted;
+    save();
+    if (state.worker2Muted) {
+      sfx('off');
+      bubble2.hidden = true;
+      usageShownId = null;
+      usageExpanded = false;
+      pendingUsageWord = null;
+      scene.setMood2('sleep');
+      placeAllBubbles();
+    } else {
+      sfx('on');
+      if (!state.paused && !dormant) scene.setMood2(usageQueue.length ? 'batch' : 'type');
+      backfillUsage();
+      const canShowLast = lastUsageWord && state.words.includes(lastUsageWord) && !(bubbleKind === 'review' && current && current.id === lastUsageWord.id);
+      if (canShowLast) {
+        showUsage(lastUsageWord);
+      } else {
+        bubble2.classList.remove('show-tr');
+        bubble2.classList.add('compact');
+        bubble2.innerHTML = '<div class="b-inner"><div class="u-tag">Bin wieder da ✓</div></div>';
+        bubble2.hidden = false;
+        placeAllBubbles();
+        worker2NoticeTimer = setTimeout(() => {
+          if (!usageShownId && !usageBusy) { bubble2.hidden = true; placeAllBubbles(); }
+        }, 2200);
+      }
+    }
+  }
 
   function cleanUsage(it) {
     const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
@@ -1419,10 +1455,11 @@
     if (priority) usageQueue.unshift(w); else usageQueue.push(w);
   }
   function backfillUsage() {
+    if (state.worker2Muted) return;
     state.words.forEach((w) => { if (!hasUsage(w) && (usageFails.get(w.id) || 0) < 3 && !usageQueue.includes(w)) usageQueue.push(w); });
   }
   async function pumpUsage() {
-    if (usageBusy || !usageQueue.length || Date.now() < usageNextAt || !window.AI || !isActive()) return;
+    if (state.worker2Muted || usageBusy || !usageQueue.length || Date.now() < usageNextAt || !window.AI || !isActive()) return;
     const batch = usageQueue.splice(0, 8).filter((w) => state.words.includes(w) && !hasUsage(w));
     if (!batch.length) return;
     usageBusy = true;
@@ -1448,20 +1485,28 @@
       usageNextAt = Date.now() + 20000;
     }
     usageBusy = false;
+    if (state.worker2Muted) {
+      usageTotal = 0;
+      bubble2.hidden = true;
+      scene.setMood2('sleep');
+      placeAllBubbles();
+      return;
+    }
     if (bulk) {
       usageDone += batch.length;
       scene.progress2 = Math.min(1, usageDone / (usageTotal || 1));
       if (usageQueue.length) showUsageProgress();
       else {
         usageTotal = 0;
-        if (!usageShownId) { bubble2.hidden = true; think('meine Kollegin hat jetzt zu jedem Wort eine Karte ✓', 5000); }
+        if (!usageShownId) { bubble2.hidden = true; placeAllBubbles(); think('meine Kollegin hat jetzt zu jedem Wort eine Karte ✓', 5000); }
       }
     }
     if (!usageQueue.length && !state.paused) scene.setMood2('type');
     if (pendingUsageWord && hasUsage(pendingUsageWord)) { const w = pendingUsageWord; pendingUsageWord = null; showUsage(w); }
   }
   function showUsageProgress() {
-    if (usageShownId) return;
+    if (state.worker2Muted || usageShownId) return;
+    clearTimeout(worker2NoticeTimer);
     bubble2.innerHTML = `<div class="b-inner"><div class="u-tag">Ich schreibe Karten zu deinen Wörtern… <b>${usageDone}/${usageTotal}</b></div></div>`;
     bubble2.classList.add('compact');
     bubble2.hidden = false;
@@ -1471,11 +1516,14 @@
   /** Cevap ortaya çıkınca: kelimenin kullanım kartını göster */
   function showUsage(w) {
     if (!w) return;
+    lastUsageWord = w;
+    if (state.worker2Muted) return;
+    clearTimeout(worker2NoticeTimer);
     if (!hasUsage(w)) { pendingUsageWord = w; queueUsage(w, true); scene.setMood2('search'); return; }
     usageShownId = w.id;
     renderUsage(w);
     scene.setMood2('present');
-    setTimeout(() => { if (scene.mood2 === 'present') scene.setMood2(usageQueue.length ? 'batch' : 'type'); }, 2600);
+    setTimeout(() => { if (!state.worker2Muted && scene.mood2 === 'present') scene.setMood2(usageQueue.length ? 'batch' : 'type'); }, 2600);
   }
   function renderUsage(w) {
     const u = w.usage;
@@ -2109,7 +2157,7 @@
       scene.setMood3('sleep');
     } else {
       setMood('happy', 1200);
-      scene.setMood2('type');
+      scene.setMood2(state.worker2Muted ? 'sleep' : 'type');
       scene.setMood3(storyBusy ? 'write' : 'idle');
       nextReviewAt = Date.now() + 8000;
     }
@@ -2133,6 +2181,7 @@
   canvas.addEventListener('click', (e) => {
     const cr = canvas.getBoundingClientRect();
     const who = scene.workerAt ? scene.workerAt(e.clientX - cr.left) : 1;
+    if (who === 2) { toggleWorker2(); return; }
     if (who === 3) { sfx(bubble3.hidden ? 'reveal' : 'menuClose'); toggleStory(); return; }
     sfx('boop');
     if (!bubbleKind) askNow();
@@ -2191,7 +2240,7 @@
   function wakeUp() {
     dormant = false;
     if (state.paused) return;
-    scene.setMood2('type');
+    scene.setMood2(state.worker2Muted ? 'sleep' : 'type');
     scene.setMood3(storyBusy ? 'write' : 'idle');
     hideThought();
     setMood('happy', 1500);
@@ -2431,13 +2480,16 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { scene.resize(); scheduleFit(); });
   scheduleFit();
   if (state.paused) { scene.setMood('sleep'); scene.setMood2('sleep'); scene.setMood3('sleep'); }
-  else if (!state.words.length) {
-    setTimeout(() => {
-      if (bubbleKind || busy) return;
-      setMood('talking', 1500);
-      showBubble(`<div class="b-tag">Hallo${nameTag(' ')}!</div><div>Ich bin da und lerne mit dir Deutsch. Schreib unten ein Wort – auf Türkisch oder Deutsch – und ich erkläre es dir. Danach bringe ich dir den ganzen Tag Sätze und Fragen.</div>
-        <div class="b-actions"><button class="btn sm" data-act="close">alles klar</button></div>`, 'info', { autoClose: 20000, focus: false });
-    }, 1200);
+  else {
+    if (state.worker2Muted) scene.setMood2('sleep');
+    if (!state.words.length) {
+      setTimeout(() => {
+        if (bubbleKind || busy) return;
+        setMood('talking', 1500);
+        showBubble(`<div class="b-tag">Hallo${nameTag(' ')}!</div><div>Ich bin da und lerne mit dir Deutsch. Schreib unten ein Wort – auf Türkisch oder Deutsch – und ich erkläre es dir. Danach bringe ich dir den ganzen Tag Sätze und Fragen.</div>
+          <div class="b-actions"><button class="btn sm" data-act="close">alles klar</button></div>`, 'info', { autoClose: 20000, focus: false });
+      }, 1200);
+    }
   }
   if (state.sync.code) setTimeout(syncNow, 1500);
   setTimeout(() => { if (typeof backfillUsage === 'function') backfillUsage(); }, 2500);
@@ -2456,5 +2508,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), openStory, renderUnderlinedStory, dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, words: state.words.length, mood: scene.mood, mood3: scene.mood3, thought: thought.hidden ? '' : thought.textContent, dormant }) };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), openStory, renderUnderlinedStory, toggleWorker2, dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, worker2Muted: !!state.worker2Muted, words: state.words.length, mood: scene.mood, mood2: scene.mood2, mood3: scene.mood3, thought: thought.hidden ? '' : thought.textContent, dormant }) };
 })();
