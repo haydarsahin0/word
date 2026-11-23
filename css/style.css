@@ -4,20 +4,17 @@
   --ink: #2b2422;
   --ink-2: rgba(43, 36, 34, 0.62);
   --ink-3: rgba(43, 36, 34, 0.18);
-  --page: #151615;
+  --page: #222723;
   --radius: 22px;
   --stroke: 1.5px;
   --serif: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; background: var(--page); }
 body {
   margin: 0;
   min-height: 100dvh;
-  background:
-    radial-gradient(120% 70% at 50% 110%, #1d2a44 0%, rgba(29, 42, 68, 0) 60%),
-    var(--page);
   color: var(--ink);
   font-family: var(--serif);
   display: flex;
@@ -28,10 +25,57 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ---------- arka plan: koyu adaçayı-çam, iki katmanlı süzülen ışık ve ince kâğıt greni ---------- */
+.bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--page);
+}
+.bg-layer {
+  position: absolute;
+  inset: -25%;
+  will-change: transform;
+}
+.bg-layer.sage {
+  background:
+    radial-gradient(52% 48% at 24% 24%, rgba(134, 156, 124, 0.28) 0%, rgba(102, 124, 96, 0.12) 45%, rgba(102, 124, 96, 0) 74%),
+    radial-gradient(56% 50% at 78% 82%, rgba(114, 138, 108, 0.24) 0%, rgba(82, 104, 80, 0.09) 46%, rgba(82, 104, 80, 0) 74%);
+  animation: drift-sage 42s ease-in-out infinite alternate;
+}
+.bg-layer.parchment {
+  background:
+    radial-gradient(48% 44% at 78% 22%, rgba(226, 214, 186, 0.17) 0%, rgba(202, 190, 160, 0.07) 44%, rgba(202, 190, 160, 0) 74%),
+    radial-gradient(52% 46% at 20% 84%, rgba(214, 200, 170, 0.14) 0%, rgba(188, 176, 148, 0.055) 45%, rgba(188, 176, 148, 0) 74%);
+  animation: drift-parchment 56s ease-in-out infinite alternate;
+}
+.bg-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.055;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+body.paused .bg-layer { animation-play-state: paused; }
+@keyframes drift-sage {
+  0% { transform: translate3d(-4%, -3%, 0) scale(1); }
+  50% { transform: translate3d(3%, 4%, 0) scale(1.06); }
+  100% { transform: translate3d(5%, -2%, 0) scale(1.02); }
+}
+@keyframes drift-parchment {
+  0% { transform: translate3d(4%, 3%, 0) scale(1.04); }
+  50% { transform: translate3d(-4%, -2%, 0) scale(1); }
+  100% { transform: translate3d(-2%, 4%, 0) scale(1.06); }
+}
+
 button, input { font: inherit; color: inherit; }
 
 .card {
   position: relative;
+  z-index: 1;
   width: min(1000px, 100%);
   background: var(--bg);
   border-radius: var(--radius);
@@ -531,6 +575,7 @@ body.paused #pauseBtn .i-pause { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .ticker-track { animation: none; }
   .bubble { animation: none; }
+  .bg-layer { animation: none; }
 }
 
 /* ---------- bilgisayar: daha büyük ekran (sadece fare/klavye; iPad ve telefon etkilenmez) ---------- */

@@ -4,7 +4,7 @@
   "description": "Türkçe ⇄ Almanca kelime öğrenme arkadaşı",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#151615",
+  "background_color": "#222723",
   "theme_color": "#a9aea6",
   "lang": "tr",
   "icons": [
