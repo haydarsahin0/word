@@ -6,13 +6,15 @@
   const MID = '#6f6c66';
   const LT = '#c4c8bf';
   const BG = '#a9aea6';
-  const DESIGN_W = 320; // iki çalışanlı geniş oda
+  const DESIGN_W = 380; // üç çalışanlı geniş oda
   const H = 92;
   const GROUND = 88;
   const HEAD_X = 84;
   const HEAD_Y = 44;
   // ikinci çalışan (kullanım uzmanı)
   const H2X = 231, H2Y = 50, H2R = 7;
+  // üçüncü çalışan (metin yazarı)
+  const H3X = 339, H3Y = 50, H3R = 7;
   const BAYER = [
     [0, 8, 2, 10],
     [12, 4, 14, 6],
@@ -44,6 +46,11 @@
       this.blink2Until = 0;
       this.nextBlink2 = performance.now() + 3300;
       this.progress2 = 0;
+      this.mood3 = 'idle';
+      this.f3 = 0;
+      this.quillPhase = 0;
+      this.blink3Until = 0;
+      this.nextBlink3 = performance.now() + 2900;
       this.W = DESIGN_W;
       this.ox = 0;
       this.k = 2;
@@ -68,7 +75,7 @@
       if (this.maxCssH && (this.k / dpr) * H > this.maxCssH) this.k = Math.max(1, Math.floor((this.maxCssH / H) * dpr));
       this.pcss = this.k / dpr;
       this.W = Math.floor(cw / this.pcss);
-      // genişse bütün oda ortalanır; darsa iki çalışan da görünecek şekilde soldan kırpılır
+      // genişse bütün oda ortalanır; darsa karakterler görünür kalacak şekilde kırpılır
       this.ox = this.W >= DESIGN_W ? Math.round((this.W - DESIGN_W) / 2) : Math.max(this.W - DESIGN_W + 30, -40);
       this.canvas.width = this.W * this.k;
       this.canvas.height = H * this.k;
@@ -90,10 +97,31 @@
       return { x, y: (H2Y - H2R - 4) * this.pcss };
     }
 
+    /** Üçüncü çalışanın (yazar) kafasının üstü (css px); görünmüyorsa null */
+    headAnchor3() {
+      const x = (H3X + this.ox) * this.pcss;
+      if (H3X + this.ox > this.W - 4 || H3X + this.ox < 4) return null;
+      return { x, y: (H3Y - H3R - 5) * this.pcss };
+    }
+
+    /** Tıklanan yatay koordinat hangi çalışanın alanında? (1, 2 veya 3) */
+    workerAt(cssX) {
+      const lx = cssX / this.pcss - this.ox;
+      if (lx >= 286 && lx <= 356) return 3;
+      if (lx >= 176 && lx <= 244) return 2;
+      return 1;
+    }
+
     setMood2(m) {
       if (m === this.mood2) return;
       this.mood2 = m;
       this.f2 = 0;
+    }
+
+    setMood3(m) {
+      if (m === this.mood3) return;
+      this.mood3 = m;
+      this.f3 = 0;
     }
 
     groundY() {
@@ -151,6 +179,10 @@
       this.f2++;
       if (t > this.nextBlink2) { this.blink2Until = t + 130; this.nextBlink2 = t + 2600 + Math.random() * 4000; }
       if (this.mood2 === 'type' || this.mood2 === 'batch') this.arm2 = Math.random() < 0.6 ? 1 - this.arm2 : this.arm2;
+      this.f3++;
+      if (t > this.nextBlink3) { this.blink3Until = t + 130; this.nextBlink3 = t + 2400 + Math.random() * 4200; }
+      if (this.mood3 === 'write') this.quillPhase = (this.quillPhase + 1) % 8;
+      else if (this.mood3 === 'idle' && this.t % 42 < 12) this.quillPhase = (this.quillPhase + 1) % 8;
       // konfeti
       this.parts.forEach((p) => { p.x += p.vx; p.y += p.vy; p.vy += 0.25; p.life--; });
       this.parts = this.parts.filter((p) => p.life > 0 && p.y < GROUND);
@@ -232,10 +264,19 @@
       this.drawClock();
       this.drawWindow(tod);
       this.drawShelf();
+      this.drawWallArt3();
       this.drawArmchair();
       this.drawCat();
       this.drawFloorPlant();
       this.drawFloorShadow();
+      // üçüncü çalışan (metin yazarı) ve masası
+      const p3 = this.pose3();
+      this.drawChair3();
+      this.drawWorker3(p3);
+      this.drawDesk3();
+      this.drawNotebook3(p3);
+      this.drawArms3(p3);
+      this.drawEffects3(p3);
       // ikinci çalışan ve masası
       const p2 = this.pose2();
       this.drawChair2();
@@ -542,6 +583,7 @@
       this.D(42, 87, 64, 1, MID);
       this.D(178, 87, 64, 1, MID);
       this.D(248, 87, 36, 1, MID, 1);
+      this.D(288, 87, 64, 1, MID);
     }
 
     drawChair() {
@@ -813,7 +855,7 @@
     drawFloorPlant() {
       // köşede uzun saksı bitkisi
       const sway = Math.floor(this.t / 14) % 2;
-      this.S(290, 58, [
+      this.S(358, 65, [
         sway ? '....#.......' : '.....#......',
         '...#m#..#...',
         '..#mm#.#m#..',
@@ -831,7 +873,7 @@
         '....#mm#....',
         '....####....',
       ]);
-      this.S(291, 74, ['..########..', '..#mmmmmm#..', '..#mmmmmm#..', '...#mmmm#...', '...#mmmm#...', '...#mmmm#...', '...######...']);
+      this.S(359, 81, ['..########..', '..#mmmmmm#..', '..#mmmmmm#..', '...#mmmm#...', '...#mmmm#...', '...#mmmm#...', '...######...']);
     }
 
     /* ---------- ikinci çalışan: kullanım uzmanı ---------- */
@@ -1000,6 +1042,228 @@
       if (this.mood2 === 'sleep') {
         const t = f % 18;
         const x = H2X + 9 + Math.floor(t / 3), y = H2Y - 6 - t;
+        if (y > 4) { this.R(x, y, 3, 1); this.P(x + 1, y + 1); this.R(x, y + 2, 3, 1); }
+      }
+    }
+
+    /* ---------- üçüncü çalışan: metin yazarı ---------- */
+    pose3() {
+      const now = performance.now();
+      const idleJot = this.mood3 === 'idle' && this.t % 42 < 12;
+      const p = {
+        eyes: now < this.blink3Until ? 'blink' : 'open',
+        dx: -1,
+        dy: 1,
+        arm: idleJot ? 'write' : 'rest',
+        mouth: 'smile',
+        by: 0,
+        cheeks: false,
+      };
+      if (this.t % 34 >= 26) p.by = 1; // sakin nefes
+      const f = this.f3;
+      switch (this.mood3) {
+        case 'write':
+          p.arm = 'write';
+          p.dy = 1;
+          p.mouth = 'line';
+          break;
+        case 'present':
+          p.arm = 'present';
+          p.dx = 0;
+          p.dy = 0;
+          p.mouth = 'smile';
+          p.cheeks = true;
+          p.by = f % 6 < 3 ? -1 : 0;
+          break;
+        case 'sleep':
+          p.eyes = 'closed';
+          p.arm = 'sleep';
+          p.by = 2;
+          p.mouth = 'none';
+          break;
+        default:
+          break;
+      }
+      return p;
+    }
+
+    drawWallArt3() {
+      // yazar masasının üstünde küçük çerçeveli tablo
+      this.R(306, 23, 1, 2);
+      this.box(296, 25, 21, 14, false, LT);
+      this.box(298, 27, 17, 10, false, BG);
+      // çerçeve içinde küçük manzara (tepe + ay)
+      this.F(310, 29, 2, 2, LT);
+      for (let i = 0; i < 6; i++) this.F(300 + i, 35 - Math.min(i, 5 - i), 1, Math.min(i, 5 - i) + 1, MID);
+      for (let i = 0; i < 7; i++) this.F(306 + i, 35 - Math.min(i, 6 - i), 1, Math.min(i, 6 - i) + 1, INK);
+    }
+
+    drawChair3() {
+      // klasik ahşap yazar sandalyesi
+      this.box(346, 56, 4, 22, true, BG);
+      this.F(347, 58, 2, 18, MID);
+      this.R(331, 77, 17, 1);
+      this.F(332, 78, 15, 2, MID);
+      this.R(331, 80, 17, 1);
+      this.R(333, 81, 1, 7);
+      this.R(346, 81, 1, 7);
+      this.R(334, 84, 12, 1);
+    }
+
+    drawWorker3(p) {
+      const cx = H3X, cy = H3Y + p.by, r = H3R;
+      // gövde: çizgili boğazlı kazak + yelek
+      const top = cy + r - 1;
+      for (let y = top; y <= 76; y++) {
+        const front = y < top + 2 ? 335 - (y - top) : 333;
+        const back = y < top + 2 ? 343 + (y - top) : 345;
+        this.C(front + 1, y, back - front - 1, 1);
+        if ((y - top) % 3 === 0) this.F(front + 1, y, back - front - 1, 1, MID);
+        this.P(front, y); this.P(back, y);
+      }
+      // küçük fular / yaka detayı
+      this.R(334, top + 1, 9, 2);
+      this.F(335, top + 1, 7, 1, LT);
+      this.R(334, top + 3, 2, 4);
+      // bacaklar ve ayakkabı
+      this.C(320, 76, 14, 4);
+      this.R(321, 76, 12, 1); this.R(321, 79, 12, 1); this.R(320, 77, 1, 8); this.R(323, 80, 1, 5);
+      this.F(321, 77, 11, 2, MID);
+      this.S(317, 84, ['.######.', '#mmmmmm#', '########', '########']);
+      // kafa (yuvarlak) ve saç tutamı
+      for (let y = -r; y <= r; y++) {
+        for (let x = -r; x <= r; x++) {
+          const d = Math.hypot(x, y);
+          if (d > r + 0.4) continue;
+          if (d > r - 0.6) this.P(cx + x, cy + y);
+          else if (x > 2 && y < 3 && d > r - 2.3) this.F(cx + x, cy + y, 1, 1, MID);
+          else this.C(cx + x, cy + y, 1, 1);
+        }
+      }
+      // yazar beresi (hafif eğik)
+      this.S(cx - 6, cy - r - 4, [
+        '.....##.....',
+        '..########..',
+        '.#mmmmmmmm#.',
+        '#mmmmmmmmmm#',
+        '.##########.',
+      ]);
+      // gözler (gözlüksüz, sıcak ifade — sola deftere bakıyor)
+      const ex = cx - 5, ey = cy - 1;
+      if (p.eyes === 'open') {
+        this.R(ex + (p.dx > 0 ? 1 : 0), ey + p.dy, 2, 2);
+        this.R(ex + 5 + (p.dx > 0 ? 1 : 0), ey + p.dy, 2, 2);
+        this.F(ex + (p.dx > 0 ? 1 : 0), ey + p.dy, 1, 1, LT);
+        this.F(ex + 5 + (p.dx > 0 ? 1 : 0), ey + p.dy, 1, 1, LT);
+      } else {
+        this.R(ex, ey + 1, 2, 1);
+        this.R(ex + 5, ey + 1, 2, 1);
+      }
+      if (p.cheeks) { this.F(ex - 1, ey + 3, 2, 1, MID); this.F(ex + 7, ey + 3, 2, 1, MID); }
+      // ağız
+      const mx = cx - 4, my = cy + 4;
+      if (p.mouth === 'line') this.R(mx, my, 2, 1);
+      else if (p.mouth === 'smile') { this.P(mx - 1, my - 1); this.R(mx, my, 3, 1); this.P(mx + 3, my - 1); }
+    }
+
+    drawDesk3() {
+      this.box(288, 71, 42, 3, false);
+      this.F(289, 72, 40, 1, MID);
+      this.box(290, 74, 3, 14, false);
+      this.box(325, 74, 3, 14, false);
+      this.box(301, 74, 16, 5, false);
+      this.R(308, 76, 2, 1);
+      this.R(293, 83, 32, 1);
+    }
+
+    drawNotebook3(p) {
+      // solda üst üste kitap / taslak yığını
+      this.box(290, 68, 9, 3, false, MID);
+      this.box(291, 65, 8, 3, false, LT);
+      this.F(292, 66, 5, 1, MID);
+      // ortada açık defter / el yazması
+      this.box(301, 67, 17, 4, false, LT);
+      this.R(309, 67, 1, 4); // orta cilt çizgisi
+      // sayfadaki yazılar (yazarken satır satır dolar)
+      const prog = this.mood3 === 'write' ? (Math.floor(this.f3 / 2) % 6) + 1 : 4;
+      this.F(303, 68, Math.min(5, prog), 1, MID);
+      if (prog > 2) this.F(303, 69, Math.min(4, prog - 1), 1, INK);
+      this.F(311, 68, Math.min(5, prog), 1, MID);
+      // kırmızı/koyu ayraç şeridi
+      this.R(309, 71, 1, 2);
+      // sağda hokka (mürekkep şişesi)
+      this.box(320, 67, 5, 4, false, MID);
+      this.R(321, 66, 3, 1);
+      this.F(321, 68, 1, 1, LT);
+    }
+
+    drawArms3(p) {
+      const by = p.by;
+      const sx = 335, sy = 60 + by;
+      const thick = (x0, y0, x1, y1) => { this.L(x0, y0, x1, y1); this.L(x0, y0 + 1, x1, y1 + 1); };
+      const hand = (x, y) => this.S(x, y, ['##', '##']);
+      switch (p.arm) {
+        case 'write': {
+          const dx = this.quillPhase < 4 ? this.quillPhase - 2 : 6 - this.quillPhase - 2;
+          const dy = this.quillPhase % 2;
+          const hx = 315 + dx, hy = 65 + dy;
+          thick(sx, sy, 328, 65);
+          thick(328, 65, hx + 1, hy);
+          hand(hx, hy - 1);
+          // elde tüy kalem (quill)
+          this.L(hx - 1, hy + 1, hx + 3, hy - 5);
+          this.F(hx + 2, hy - 6, 3, 2, LT);
+          this.P(hx + 4, hy - 7);
+          this.P(hx + 1, hy - 5);
+          break;
+        }
+        case 'present':
+          thick(sx, sy, 329, 55 + by);
+          hand(327, 52 + by);
+          // havaya kaldırılan yazılı metin sayfası (altı çizili kelimelerle)
+          this.box(317, 41 + by, 11, 10, false, LT);
+          this.F(319, 43 + by, 7, 1, MID);
+          this.R(319, 45 + by, 4, 1);
+          this.F(324, 45 + by, 2, 1, MID);
+          this.F(319, 47 + by, 3, 1, MID);
+          this.R(323, 47 + by, 3, 1);
+          this.F(319, 49 + by, 6, 1, MID);
+          break;
+        case 'sleep':
+          thick(sx, sy, 329, 68);
+          thick(329, 68, 321, 69);
+          hand(319, 68);
+          break;
+        default:
+          thick(sx, sy, 329, 66);
+          thick(329, 66, 319, 67);
+          hand(317, 66);
+          // hokkada duran tüy kalem
+          this.L(322, 66, 325, 61);
+          this.F(324, 60, 2, 2, LT);
+          this.P(326, 59);
+      }
+    }
+
+    drawEffects3(p) {
+      const f = this.f3;
+      if (this.mood3 === 'write') {
+        // yazarken defterden yükselen küçük ilham kıvılcımları / satır parçaları
+        const k = f % 10;
+        const y = 60 - Math.floor(k * 1.4);
+        if (y > 38) {
+          this.F(307 + (k % 3), y, 3, 1, MID);
+          if (k % 4 < 2) this.P(313 - (k % 2), y - 2);
+        }
+      }
+      if (this.mood3 === 'present' && f % 4 < 3) {
+        [[314, 40], [330, 39], [313, 49]].forEach(([x, y], i) => {
+          if ((f + i) % 3) { this.P(x, y - 1); this.P(x, y + 1); this.P(x - 1, y); this.P(x + 1, y); }
+        });
+      }
+      if (this.mood3 === 'sleep') {
+        const t = f % 18;
+        const x = H3X + 9 + Math.floor(t / 3), y = H3Y - 6 - t;
         if (y > 4) { this.R(x, y, 3, 1); this.P(x + 1, y + 1); this.R(x, y + 2, 3, 1); }
       }
     }

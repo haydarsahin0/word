@@ -247,6 +247,57 @@ const THEMES = [
   "in the park", "at a party", "money and banking", "renting a flat", "the internet and phones", "the evening routine",
 ];
 
+const STORY_TOPICS = [
+  "a rainy evening in a tiny secondhand bookshop",
+  "a delayed night train crossing the Alps",
+  "finding an old postcard inside a thrifted jacket",
+  "cooking dinner for unexpected guests",
+  "a lively Sunday morning flea market",
+  "a quiet morning by a foggy lake",
+  "a chaotic first day at a new workplace",
+  "a lost dog making friends in the city park",
+  "a neighborhood bakery opening before sunrise",
+  "a weekend bicycle trip along a river",
+  "an old cinema showing a classic film",
+  "a sudden power outage in an apartment building",
+  "a warm greenhouse in the middle of winter",
+  "a small ferry ride across a windy harbor",
+  "trying to repair a vintage radio with a friend",
+  "a wooden cabin weekend in the forest",
+  "a busy train station kiosk on Friday evening",
+  "a rooftop garden party on a summer night",
+  "a small local museum just before closing time",
+  "a friendly debate at a corner café",
+  "packing in a hurry for a spontaneous trip",
+  "a street musician on an old cobblestone square",
+  "a snowy morning when all the buses stop",
+  "moving boxes into a quirky new apartment",
+  "a late-night laundromat conversation",
+  "a cooking class where something goes hilariously wrong",
+  "visiting a lighthouse on a breezy afternoon",
+  "a forgotten umbrella that leads to a nice surprise",
+];
+
+const STORY_PROMPT = `You are a creative German short-story writer sitting at the third desk in the learner's study room.
+Write a natural, engaging, cohesive short German text (about 110–170 words, 2–3 short paragraphs) on the given random topic
+for a Turkish learner at A2–B1 level.
+CRITICAL RULES:
+- Naturally include EVERY target word from the input list at least once in the German text. You may inflect or conjugate them
+  naturally for German grammar (plural, cases, verb conjugation, separable prefix).
+- Wrap EVERY occurrence of the target words in double square brackets [[...]] inside "text_de", keeping punctuation outside
+  the brackets (e.g. "Er [[fängt]] früh [[an]].", "Das [[Buch]] liegt dort.").
+- Do NOT wrap words that are not in the target list.
+- Keep the German natural, vivid, and pleasant to read — never forced, robotic, or list-like.
+- Never use emojis.
+Return ONLY JSON:
+{
+  "topic_de": "<short German label for the topic, 2–5 words>",
+  "topic_tr": "<same topic in Turkish, 2–5 words>",
+  "title_de": "<short evocative German title>",
+  "text_de": "<the German text with paragraphs separated by \\n\\n and every target word wrapped in [[...]]>",
+  "text_tr": "<natural Turkish translation of the full text with matching \\n\\n paragraphs, NO brackets>"
+}`;
+
 /* ---------- sunucu ---------- */
 /* ---------- görsel yardımcıları ---------- */
 const IMG_MODEL = "muse-image-1.0";
@@ -408,6 +459,30 @@ async function handle(req) {
         EFFORT = "medium"; // kelime başına bir kez üretilir: doğruluk önemli
         const out = await askJson(USAGE_PROMPT, JSON.stringify(words), 0.3);
         return json({ items: Array.isArray(out?.items) ? out.items : [], _usage: USAGE }, 200, h);
+      }
+
+      // ---------- üçüncü çalışan: seçilen kelimelerle rastgele konuda metin ----------
+      case "story": {
+        const words = (Array.isArray(body.words) ? body.words : []).slice(0, 15).map((w) => ({
+          word: (String(w.art ?? "") + " " + String(w.de ?? "")).trim().slice(0, 60),
+          turkish: String(w.tr ?? "").slice(0, 60),
+        })).filter((w) => w.word);
+        if (!words.length) return json({ error: "empty" }, 400, h);
+        const avoid = new Set((Array.isArray(body.avoidTopics) ? body.avoidTopics : []).slice(-10).map((t) => String(t).toLowerCase()));
+        const pool = STORY_TOPICS.filter((t) => !avoid.has(t.toLowerCase()));
+        const topic = (pool.length ? pool : STORY_TOPICS)[Math.floor(Math.random() * (pool.length || STORY_TOPICS.length))];
+        EFFORT = "low";
+        const user = `Random topic: ${topic}\nTarget words (include EVERY one and wrap each occurrence in [[...]]):\n${JSON.stringify(words)}`;
+        const out = await askJson(withProfile(STORY_PROMPT, body), user, 0.85);
+        return json({
+          topic_seed: topic,
+          topic_de: String(out?.topic_de ?? "").slice(0, 100),
+          topic_tr: String(out?.topic_tr ?? "").slice(0, 100),
+          title_de: String(out?.title_de ?? "").slice(0, 120),
+          text_de: String(out?.text_de ?? "").slice(0, 3500),
+          text_tr: String(out?.text_tr ?? "").slice(0, 3500),
+          _usage: USAGE,
+        }, 200, h);
       }
 
       case "ping":

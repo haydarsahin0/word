@@ -10,10 +10,10 @@
   let usageCb = null;
 
   async function call(action, payload, ms = 25000) {
-    const independent = action === 'image' || action === 'usage'; // görseller/kullanım bilgisi konuşma hatalarından etkilenmesin
+    const independent = action === 'image' || action === 'usage' || action === 'story'; // görseller/kullanım/metin konuşma hatalarından etkilenmesin
     if (!independent && Date.now() < downUntil) throw new Error('ai_down');
-    // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri hariç
-    if (action !== 'lookup' && !activeCheck()) throw new Error('inactive');
+    // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri ve metin yazma hariç
+    if (action !== 'lookup' && action !== 'story' && !activeCheck()) throw new Error('inactive');
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), ms);
     try {
@@ -88,6 +88,21 @@
     return Array.isArray(j.items) ? j.items : [];
   }
 
+  /** Üçüncü çalışan: seçilen kelimelerin geçtiği rastgele konuda metin */
+  async function story(words, avoidTopics = []) {
+    const j = await call('story', { words, avoidTopics }, 60000);
+    const text_de = typeof j.text_de === 'string' ? j.text_de.trim() : '';
+    if (!text_de) throw new Error('ai_empty');
+    return {
+      topic_seed: s(j.topic_seed, 120),
+      topic_de: s(j.topic_de, 100),
+      topic_tr: s(j.topic_tr, 100),
+      title_de: s(j.title_de, 120),
+      text_de,
+      text_tr: typeof j.text_tr === 'string' ? j.text_tr.trim() : '',
+    };
+  }
+
   async function profile(old, events) {
     return call('profile', { old, events }, 45000);
   }
@@ -123,7 +138,7 @@
   };
 
   window.AI = {
-    lookup, talk, check, profile, image, usage,
+    lookup, talk, check, profile, image, usage, story,
     setProfileProvider: (fn) => { profileProvider = fn; },
     setActiveCheck: (fn) => { activeCheck = fn; },
     onUsage: (fn) => { usageCb = fn; },

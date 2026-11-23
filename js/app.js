@@ -357,6 +357,7 @@
   const ID_SOUNDS = {
     menuBtn: 'menuOpen', closeSheet: 'menuClose', askBtn: 'ask', exportBtn: 'export',
     resetBtn: 'reset', profileRefresh: 'refresh', profileForget: 'forget',
+    storyBtn: 'reveal', closeStory: 'menuClose', storyWriteBtn: 'ask',
   };
   function soundFor(b) {
     if (b.id === 'pauseBtn') return state.paused ? 'resume' : 'pause';
@@ -374,7 +375,7 @@
     if (b.id === 'engineTest') return null;
     if (b.closest('#engineSeg')) return 'tap';
     if (b.closest('#sfxSeg')) return b.dataset.v === 'on' ? null : 'off';
-    if (b.classList.contains('del')) return 'crumple';
+    if (b.classList.contains('del') || b.classList.contains('st-hist-del')) return 'crumple';
     if (b.id === 'syncCreate' || b.id === 'syncJoin') return 'coin';
     if (b.id === 'syncNowBtn') return 'refresh';
     if (b.id === 'syncCopy') return 'bell';
@@ -396,7 +397,7 @@
   const stage = $('stage');
   const bubble = $('bubble');
   const scene = new window.Scene(canvas);
-  scene.onResize = () => { syncGround(); placeBubble(); if (typeof placeThought === 'function') placeThought(); };
+  scene.onResize = () => { syncGround(); placeBubble(); if (typeof placeThought === 'function') placeThought(); if (typeof placeBubble3 === 'function') placeBubble3(); };
 
   /** Kart ekrana sığsın: önce karakterin üstündeki boşluk, gerekirse sahne küçülür */
   function fitToScreen() {
@@ -420,6 +421,7 @@
     placeBubble();
     if (typeof placeThought === 'function') placeThought();
     if (typeof placeBubble2 === 'function') placeBubble2();
+    if (typeof placeBubble3 === 'function') placeBubble3();
   }
   let fitTimer = 0;
   const scheduleFit = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitToScreen, 60); };
@@ -1495,6 +1497,401 @@
   });
   window.addEventListener('resize', placeBubble2);
 
+  /* ---------- üçüncü çalışan: metin yazarı (seçilen kelimelerle rastgele konuda metin) ---------- */
+  const bubble3 = $('bubble3');
+  const storyWrap = $('storyWrap');
+  const storyPicker = $('storyPicker');
+  const storySearch = $('storySearch');
+  const storyChips = $('storyChips');
+  const storyExtra = $('storyExtra');
+  const storyCount = $('storyCount');
+  const storyWriteBtn = $('storyWriteBtn');
+  const storyOut = $('storyOut');
+  const storyHist = $('storyHist');
+  const storySelected = new Set(); // seçili kelime id'leri
+  let storyBusy = false;
+  let activeStory = null;
+  let storyPickerCollapsed = false;
+  let storyErr = '';
+
+  function parseExtraWords() {
+    return (storyExtra.value || '')
+      .split(/[,;\n]+/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .slice(0, 15)
+      .map((raw) => {
+        const m = raw.match(/^(der|die|das)\s+(.+)$/i);
+        return { de: m ? m[2].trim() : raw, art: m ? m[1].toLowerCase() : '', tr: '' };
+      });
+  }
+
+  function collectSelectedWords() {
+    const picked = [];
+    const seen = new Set();
+    state.words.forEach((w) => {
+      if (!storySelected.has(w.id)) return;
+      const k = w.de.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      picked.push({ id: w.id, de: w.de, art: w.art || '', tr: w.tr || '' });
+    });
+    parseExtraWords().forEach((w) => {
+      const k = w.de.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      picked.push(w);
+    });
+    return picked.slice(0, 15);
+  }
+
+  function findTargetMeaning(token, targets) {
+    const low = token.toLowerCase();
+    const hit = targets.find((w) => {
+      const d = (w.de || '').toLowerCase();
+      if (!d) return false;
+      if (d === low) return true;
+      return d.length >= 4 && (low.startsWith(d.slice(0, Math.min(d.length, 5))) || d.startsWith(low.slice(0, Math.min(low.length, 5))));
+    });
+    return hit ? { label: (hit.art ? hit.art + ' ' : '') + hit.de, tr: hit.tr || '' } : null;
+  }
+
+  /** Metni paragraflara ayır; [[...]] içindeki ve seçili hedef kelimeleri altı çizili yap */
+  function renderUnderlinedStory(textDe, targets) {
+    const exactMap = new Map();
+    targets.forEach((w) => {
+      if (!w.de) return;
+      exactMap.set(w.de.toLowerCase(), w);
+      // çok kelimeli girişlerde anlamlı parçaları da eşleştir
+      w.de.split(/\s+/).filter((p) => p.length >= 4).forEach((p) => {
+        if (!exactMap.has(p.toLowerCase())) exactMap.set(p.toLowerCase(), w);
+      });
+    });
+
+    const wrapHit = (word, info) => {
+      const label = info ? ((info.art ? info.art + ' ' : '') + info.de) : word;
+      const tr = info && info.tr ? info.tr : '';
+      return `<u class="st-hit" data-word="${esc(word)}" data-label="${esc(label)}" data-tr="${esc(tr)}" title="${esc(tr || label)}">${esc(word)}</u>`;
+    };
+
+    const decoratePlain = (seg) => {
+      let out = '', last = 0;
+      const re = /[A-Za-zÄÖÜäöüß]+/g;
+      let m;
+      while ((m = re.exec(seg))) {
+        if (m.index > last) out += esc(seg.slice(last, m.index));
+        const tok = m[0];
+        const hit = exactMap.get(tok.toLowerCase());
+        out += hit ? wrapHit(tok, hit) : esc(tok);
+        last = m.index + tok.length;
+      }
+      if (last < seg.length) out += esc(seg.slice(last));
+      return out;
+    };
+
+    return String(textDe || '')
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((para) => {
+        const parts = para.split(/(\[\[[^\]]+\]\])/g);
+        const html = parts.map((part) => {
+          if (part.startsWith('[[') && part.endsWith(']]')) {
+            const inner = part.slice(2, -2).trim();
+            if (!inner) return '';
+            const guess = findTargetMeaning(inner, targets);
+            return wrapHit(inner, guess ? { de: guess.label, art: '', tr: guess.tr } : null);
+          }
+          return decoratePlain(part);
+        }).join('');
+        return `<p>${html}</p>`;
+      })
+      .join('');
+  }
+
+  function showBubble3(html) {
+    if (!html) { bubble3.hidden = true; return; }
+    bubble3.innerHTML = `<div class="b-inner">${html}</div>`;
+    bubble3.hidden = false;
+    placeBubble3();
+  }
+
+  function placeBubble3() {
+    if (bubble3.hidden) return;
+    const a = scene.headAnchor3();
+    const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    const hx = a ? cr.left - sr.left + a.x : sr.width - 24;
+    const hy = a ? cr.top - sr.top + a.y : cr.top - sr.top + 40;
+    const bw = bubble3.offsetWidth;
+    const left = Math.max(8, Math.min(hx - bw * 0.65, sr.width - bw - 8));
+    bubble3.style.left = left + 'px';
+    bubble3.style.bottom = (sr.height - hy + 14) + 'px';
+    bubble3.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
+    bubble3.classList.remove('floating');
+    // diğer balonlarla çakışırsa kuyruksuz üstte dur
+    const b3 = { l: bubble3.offsetLeft, t: bubble3.offsetTop, r: bubble3.offsetLeft + bubble3.offsetWidth, b: bubble3.offsetTop + bubble3.offsetHeight };
+    for (const other of [bubble, bubble2]) {
+      if (other.hidden) continue;
+      const o = { l: other.offsetLeft, t: other.offsetTop, r: other.offsetLeft + other.offsetWidth, b: other.offsetTop + other.offsetHeight };
+      if (!(b3.r < o.l || b3.l > o.r || b3.b < o.t || b3.t > o.b)) {
+        bubble3.style.bottom = (stage.clientHeight - o.t + 8) + 'px';
+        bubble3.classList.add('floating');
+        break;
+      }
+    }
+  }
+  bubble3.addEventListener('click', () => { openStory(); });
+  window.addEventListener('resize', placeBubble3);
+
+  function renderStoryPicker() {
+    // silinmiş kelimeleri seçimden temizle
+    const validIds = new Set(state.words.map((w) => w.id));
+    [...storySelected].forEach((id) => { if (!validIds.has(id)) storySelected.delete(id); });
+
+    const q = (storySearch.value || '').trim().toLowerCase();
+    const list = [...state.words].reverse().filter((w) => !q || w.de.toLowerCase().includes(q) || (w.tr || '').toLowerCase().includes(q));
+    if (!state.words.length) {
+      storyChips.innerHTML = '<div class="st-empty">Defterinde henüz kelime yok — aşağıya virgülle birkaç Almanca kelime yazabilirsin.</div>';
+    } else if (!list.length) {
+      storyChips.innerHTML = '<div class="st-empty">Eşleşen kelime bulunamadı.</div>';
+    } else {
+      storyChips.innerHTML = list.map((w) => {
+        const on = storySelected.has(w.id);
+        return `<button type="button" class="st-chip${on ? ' on' : ''}" data-sid="${esc(w.id)}"><i>${esc(fullDe(w))}</i><small>${esc(w.tr)}</small></button>`;
+      }).join('');
+    }
+    const picked = collectSelectedWords();
+    const n = picked.length;
+    storyCount.textContent = n ? `${n} kelime seçildi${n >= 15 ? ' (en fazla 15)' : ''}` : 'Metinde geçmesini istediğin kelimeleri seç';
+    storyWriteBtn.disabled = storyBusy || !n;
+    storyWriteBtn.textContent = storyBusy ? 'Yazıyor…' : (n ? `Metin yaz (${n})` : 'Metin yaz');
+    storyPicker.hidden = storyPickerCollapsed && !!activeStory && !storyBusy;
+  }
+
+  function renderStoryOutput() {
+    if (storyBusy) {
+      storyOut.hidden = false;
+      storyOut.classList.remove('show-tr');
+      storyOut.innerHTML = '<div class="st-loading">Üçüncü çalışan rastgele bir konu seçip kelimelerinle metni yazıyor…</div>';
+      return;
+    }
+    if (storyErr) {
+      storyOut.hidden = false;
+      storyOut.classList.remove('show-tr');
+      storyOut.innerHTML = `<div class="st-err">${esc(storyErr)}</div>`;
+      return;
+    }
+    if (!activeStory) {
+      storyOut.hidden = true;
+      storyOut.innerHTML = '';
+      return;
+    }
+    const st = activeStory;
+    const words = Array.isArray(st.words) ? st.words : [];
+    const bodyHtml = renderUnderlinedStory(st.text_de, words);
+    const trHtml = (st.text_tr || '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join('');
+    storyOut.hidden = false;
+    storyOut.classList.remove('show-tr');
+    storyOut.innerHTML = `
+      <div class="st-meta">
+        <div class="st-topic">Konu: <b>${esc(st.topic_de || 'Zufälliges Thema')}</b>${st.topic_tr ? ` <span class="tr">(${esc(st.topic_tr)})</span>` : ''}</div>
+        <div class="st-tools">
+          <button type="button" class="btn sm" data-sact="listen" aria-label="Metni sesli dinle">▶ dinle</button>
+          ${trHtml ? '<button type="button" class="btn sm" data-sact="tr" aria-label="Türkçe çeviri">TR</button>' : ''}
+        </div>
+      </div>
+      ${st.title_de ? `<h3 class="st-title">${esc(st.title_de)}</h3>` : ''}
+      <div class="st-body">${bodyHtml}</div>
+      <div class="st-gloss" id="storyGloss">Altı çizili bir kelimeye dokun: sesli oku &amp; anlamı gör.</div>
+      ${trHtml ? `<div class="st-tr">${trHtml}</div>` : ''}
+      ${words.length ? `<div class="st-used">${words.map((w) => `<button type="button" data-sword="${esc((w.art ? w.art + ' ' : '') + w.de)}" data-str="${esc(w.tr || '')}">${esc((w.art ? w.art + ' ' : '') + w.de)}</button>`).join('')}</div>` : ''}
+      <div class="st-actions">
+        <button type="button" class="btn sm" data-sact="rewrite">Yeni konuyla tekrar yaz</button>
+        <button type="button" class="btn sm" data-sact="edit-words">${storyPickerCollapsed ? 'Kelimeleri değiştir' : 'Seçiciyi gizle'}</button>
+      </div>`;
+  }
+
+  function renderStoryHistory() {
+    const list = Array.isArray(state.stories) ? state.stories : [];
+    if (!list.length) { storyHist.hidden = true; storyHist.innerHTML = ''; return; }
+    storyHist.hidden = false;
+    storyHist.innerHTML = `<div class="list-head"><span>Son yazılan metinler</span><span class="muted">${list.length}</span></div>
+      <div class="st-hist-list">${list.map((st) => `
+        <div class="st-hist-item">
+          <button type="button" class="st-hist-open" data-sopen="${esc(st.id)}">
+            <b>${esc(st.title_de || st.topic_de || 'Metin')}</b>
+            <small>${esc((st.words || []).map((w) => w.de).join(', '))}</small>
+          </button>
+          <button type="button" class="st-hist-del" data-sdel="${esc(st.id)}" aria-label="Metni sil">×</button>
+        </div>`).join('')}</div>`;
+  }
+
+  function openStory() {
+    bubble3.hidden = true;
+    storyErr = '';
+    if (!activeStory && state.stories && state.stories.length && !storySelected.size) {
+      // daha önce metin varsa picker açık başlasın ki hemen yeni kelimeler seçilebilsin
+      storyPickerCollapsed = false;
+    }
+    renderStoryPicker();
+    renderStoryOutput();
+    renderStoryHistory();
+    storyWrap.hidden = false;
+    $('storyBtn').classList.add('on');
+    readerQuietUntil = Date.now() + 60000;
+  }
+
+  function closeStory() {
+    storyWrap.hidden = true;
+    $('storyBtn').classList.remove('on');
+    if (storyBusy) showBubble3('<div class="u-tag">Ich schreibe deine Geschichte…</div>');
+  }
+
+  async function generateStory(reuseWords) {
+    const words = reuseWords && reuseWords.length ? reuseWords : collectSelectedWords();
+    if (!words.length || storyBusy) return;
+    if (!window.AI) { storyErr = 'AI istemcisi yüklenemedi.'; renderStoryOutput(); return; }
+    storyBusy = true;
+    storyErr = '';
+    storyPickerCollapsed = false;
+    scene.setMood3('write');
+    if (storyWrap.hidden) showBubble3('<div class="u-tag">Ich schreibe deine Geschichte…</div>');
+    renderStoryPicker();
+    renderStoryOutput();
+    try {
+      const avoidTopics = (state.stories || []).slice(0, 8).map((x) => x.topic_seed).filter(Boolean);
+      const res = await AI.story(words.map((w) => ({ de: w.de, art: w.art || '', tr: w.tr || '' })), avoidTopics);
+      const entry = {
+        id: 'st_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        at: Date.now(),
+        words: words.map((w) => ({ de: w.de, art: w.art || '', tr: w.tr || '' })),
+        topic_seed: res.topic_seed,
+        topic_de: res.topic_de,
+        topic_tr: res.topic_tr,
+        title_de: res.title_de,
+        text_de: res.text_de,
+        text_tr: res.text_tr,
+      };
+      activeStory = entry;
+      state.stories = [entry, ...(state.stories || [])].slice(0, 10);
+      save();
+      storyPickerCollapsed = true;
+      scene.setMood3('present');
+      sfx('coin');
+      setTimeout(() => { if (!state.paused && !storyBusy && scene.mood3 === 'present') scene.setMood3('idle'); }, 3500);
+      if (storyWrap.hidden) showBubble3('<div class="u-tag">Fertig! <b>Geschichte lesen ▸</b></div>');
+    } catch (e) {
+      const msg = String((e && e.message) || e || '');
+      storyErr = msg === 'unknown_action'
+        ? 'Cloudflare Worker henüz güncellenmemiş: cloudflare/worker.js dosyasını Cloudflare panelinde Deploy ettikten sonra tekrar dene.'
+        : 'Metin şu an yazılamadı (' + (msg || 'bağlantı hatası') + '). Biraz sonra tekrar dene.';
+      scene.setMood3(state.paused ? 'sleep' : 'idle');
+      bubble3.hidden = true;
+    } finally {
+      storyBusy = false;
+      renderStoryPicker();
+      renderStoryOutput();
+      renderStoryHistory();
+    }
+  }
+
+  $('storyBtn').addEventListener('click', openStory);
+  $('closeStory').addEventListener('click', closeStory);
+  storyWrap.addEventListener('click', (e) => { if (e.target === storyWrap) closeStory(); });
+  storySearch.addEventListener('input', renderStoryPicker);
+  storyExtra.addEventListener('input', renderStoryPicker);
+  storyExtra.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); generateStory(); } });
+
+  storyChips.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sid]');
+    if (!b) return;
+    const id = b.dataset.sid;
+    if (storySelected.has(id)) storySelected.delete(id);
+    else if (collectSelectedWords().length < 15) storySelected.add(id);
+    renderStoryPicker();
+  });
+
+  $('storyRand').addEventListener('click', () => {
+    storySelected.clear();
+    const pool = [...state.words].sort(() => Math.random() - 0.5).slice(0, 5);
+    pool.forEach((w) => storySelected.add(w.id));
+    renderStoryPicker();
+  });
+  $('storyRecent').addEventListener('click', () => {
+    storySelected.clear();
+    state.words.slice(-5).forEach((w) => storySelected.add(w.id));
+    renderStoryPicker();
+  });
+  $('storyClear').addEventListener('click', () => {
+    storySelected.clear();
+    storyExtra.value = '';
+    renderStoryPicker();
+  });
+  storyWriteBtn.addEventListener('click', () => generateStory());
+
+  storyOut.addEventListener('click', (e) => {
+    const hit = e.target.closest('.st-hit');
+    if (hit) {
+      const w = hit.dataset.word || hit.textContent;
+      const lbl = hit.dataset.label || w;
+      const tr = hit.dataset.tr || '';
+      say(w);
+      const g = $('storyGloss');
+      if (g) g.innerHTML = tr ? `<b>${esc(lbl)}</b> — ${esc(tr)}` : `<b>${esc(lbl)}</b>`;
+      return;
+    }
+    const chip = e.target.closest('[data-sword]');
+    if (chip) {
+      const w = chip.dataset.sword;
+      const tr = chip.dataset.str || '';
+      say(w);
+      const g = $('storyGloss');
+      if (g) g.innerHTML = tr ? `<b>${esc(w)}</b> — ${esc(tr)}` : `<b>${esc(w)}</b>`;
+      return;
+    }
+    const b = e.target.closest('[data-sact]');
+    if (!b) return;
+    const act = b.dataset.sact;
+    if (act === 'tr') {
+      const on = storyOut.classList.toggle('show-tr');
+      b.classList.toggle('on', on);
+    } else if (act === 'listen' && activeStory) {
+      const plain = String(activeStory.text_de || '').replace(/\[\[|\]\]/g, '');
+      say((activeStory.title_de ? activeStory.title_de + '. ' : '') + plain);
+    } else if (act === 'rewrite' && activeStory) {
+      generateStory(activeStory.words);
+    } else if (act === 'edit-words') {
+      storyPickerCollapsed = !storyPickerCollapsed;
+      renderStoryPicker();
+      renderStoryOutput();
+    }
+  });
+
+  storyHist.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-sdel]');
+    if (del) {
+      const id = del.dataset.sdel;
+      state.stories = (state.stories || []).filter((x) => x.id !== id);
+      if (activeStory && activeStory.id === id) { activeStory = null; storyPickerCollapsed = false; }
+      save();
+      renderStoryPicker();
+      renderStoryOutput();
+      renderStoryHistory();
+      return;
+    }
+    const open = e.target.closest('[data-sopen]');
+    if (open) {
+      const found = (state.stories || []).find((x) => x.id === open.dataset.sopen);
+      if (found) {
+        activeStory = found;
+        storyErr = '';
+        storyPickerCollapsed = true;
+        renderStoryPicker();
+        renderStoryOutput();
+      }
+    }
+  });
+
   /* ---------- kitap: kelimeye dokun → anlamı, deftere ekle ---------- */
   let readerQuietUntil = 0;
   let pendingBook = null;
@@ -1699,9 +2096,12 @@
       hideBubbleQuiet();
       current = null;
       scene.setMood('sleep');
+      scene.setMood2('sleep');
+      scene.setMood3('sleep');
     } else {
       setMood('happy', 1200);
       scene.setMood2('type');
+      scene.setMood3(storyBusy ? 'write' : 'idle');
       nextReviewAt = Date.now() + 8000;
     }
   });
@@ -1721,13 +2121,19 @@
     startReview(w);
   }
   $('askBtn').addEventListener('click', askNow);
-  canvas.addEventListener('click', () => { sfx('boop'); if (!bubbleKind) askNow(); });
+  canvas.addEventListener('click', (e) => {
+    const cr = canvas.getBoundingClientRect();
+    const who = scene.workerAt ? scene.workerAt(e.clientX - cr.left) : 1;
+    if (who === 3) { sfx('reveal'); openStory(); return; }
+    sfx('boop');
+    if (!bubbleKind) askNow();
+  });
 
   /* ---------- sürekli döngü ---------- */
   /** Balon kapanınca sıradaki soruyu hemen getir (1 sn'lik döngüyü beklemeden) */
   function tickTalk() {
     const now = Date.now();
-    if (state.paused || !isActive() || busy || bubbleKind) return;
+    if (state.paused || !isActive() || busy || bubbleKind || !storyWrap.hidden) return;
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
     if (typingNow || now < readerQuietUntil || now < nextReviewAt) return;
     nextTalk();
@@ -1735,7 +2141,7 @@
 
   setInterval(() => {
     const now = Date.now();
-    if (state.paused) { scene.setMood('sleep'); scene.setMood2('sleep'); return; }
+    if (state.paused) { scene.setMood('sleep'); scene.setMood2('sleep'); scene.setMood3('sleep'); return; }
     if (!isActive()) { if (!dormant) fallAsleep(); return; } // bakmıyorsan hiçbir şey çağrılmaz
     if (busy) return;
     if (!bubbleKind && now < readerQuietUntil && now > moodUntil) {
@@ -1749,7 +2155,7 @@
       scene.setMood('waiting');
     }
     const typingNow = document.activeElement === $('wordInput') && $('wordInput').value;
-    const reading = now < readerQuietUntil; // okurken kanka araya girmez
+    const reading = now < readerQuietUntil || !storyWrap.hidden; // okurken / metin yazarken kanka araya girmez
     if (!bubbleKind && !typingNow && !reading && now >= nextReviewAt) {
       nextTalk();
     } else if (!bubbleKind && !typingNow && !reading && thought.hidden && now >= nextThoughtAt) {
@@ -1770,12 +2176,14 @@
     dormant = true;
     scene.setMood('sleep');
     scene.setMood2('sleep');
+    scene.setMood3('sleep');
     if (!document.hidden && bubble.hidden) think('ich mache ein kleines Nickerchen… tipp mich an', 12000);
   }
   function wakeUp() {
     dormant = false;
     if (state.paused) return;
     scene.setMood2('type');
+    scene.setMood3(storyBusy ? 'write' : 'idle');
     hideThought();
     setMood('happy', 1500);
     think(pick([`Da bist du ja${nameTag(', ')}! Weiter geht’s`, `Hallo${nameTag(' ')}! Ich habe auf dich gewartet`, 'Ich bin wach – los geht’s']), 4000);
@@ -1793,7 +2201,11 @@
   $('closeSheet').addEventListener('click', () => { sheet.hidden = true; });
   sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.hidden = true; });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { if (!sheet.hidden) sheet.hidden = true; else if (bubbleKind && bubbleKind !== 'review') hideBubble(); }
+    if (e.key === 'Escape') {
+      if (!storyWrap.hidden) closeStory();
+      else if (!sheet.hidden) sheet.hidden = true;
+      else if (bubbleKind && bubbleKind !== 'review') hideBubble();
+    }
   });
 
   function openSheet() {
@@ -2009,7 +2421,7 @@
   requestAnimationFrame(syncGround);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { scene.resize(); scheduleFit(); });
   scheduleFit();
-  if (state.paused) scene.setMood('sleep');
+  if (state.paused) { scene.setMood('sleep'); scene.setMood2('sleep'); scene.setMood3('sleep'); }
   else if (!state.words.length) {
     setTimeout(() => {
       if (bubbleKind || busy) return;
@@ -2035,5 +2447,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, words: state.words.length, mood: scene.mood, thought: thought.hidden ? '' : thought.textContent, dormant }) };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), openStory, renderUnderlinedStory, dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, words: state.words.length, mood: scene.mood, mood3: scene.mood3, thought: thought.hidden ? '' : thought.textContent, dormant }) };
 })();
