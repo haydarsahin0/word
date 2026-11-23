@@ -76,7 +76,7 @@ button, input { font: inherit; color: inherit; }
 .card {
   position: relative;
   z-index: 1;
-  width: min(1000px, 100%);
+  width: min(1160px, 100%);
   background: var(--bg);
   border-radius: var(--radius);
   padding: 18px 18px 14px;
@@ -766,8 +766,8 @@ body.paused #pauseBtn .i-pause { display: none; }
   .b-ex .tr, .b-hint { font-size: 13.5px; }
 }
 @media (min-width: 700px) {
-  .card { width: min(1000px, 100%); }
-  .stage { padding-top: 150px; }
+  .card { width: min(1180px, 100%); }
+  .stage { padding-top: 164px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ticker-track { animation: none; }
@@ -777,8 +777,8 @@ body.paused #pauseBtn .i-pause { display: none; }
 
 /* ---------- bilgisayar: daha büyük ekran (sadece fare/klavye; iPad ve telefon etkilenmez) ---------- */
 @media (min-width: 900px) and (hover: hover) and (pointer: fine) {
-  .card { width: min(1240px, calc(100vw - 48px)); padding: 24px 26px 18px; border-radius: 26px; }
-  .stage { margin: 0 -26px; padding-top: 170px; }
+  .card { width: min(1480px, calc(100vw - 32px)); padding: 24px 26px 18px; border-radius: 26px; }
+  .stage { margin: 0 -26px; padding-top: 196px; }
   .streak { font-size: 30px; }
   .streak .unit { font-size: 18px; }
   .cost b { font-size: 27px; }

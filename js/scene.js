@@ -6,15 +6,17 @@
   const MID = '#6f6c66';
   const LT = '#c4c8bf';
   const BG = '#a9aea6';
-  const DESIGN_W = 380; // üç çalışanlı geniş oda
+  const DESIGN_W = 450; // üç çalışanlı ferah geniş oda
   const H = 92;
   const GROUND = 88;
   const HEAD_X = 84;
   const HEAD_Y = 44;
   // ikinci çalışan (kullanım uzmanı)
   const H2X = 231, H2Y = 50, H2R = 7;
-  // üçüncü çalışan (metin yazarı)
-  const H3X = 339, H3Y = 50, H3R = 7;
+  // üçüncü çalışan (metin yazarı) — sağ bölgede ferah aralıkla
+  const O3 = 44;
+  const H3X_LOCAL = 339;
+  const H3X = H3X_LOCAL + O3, H3Y = 50, H3R = 7;
   const BAYER = [
     [0, 8, 2, 10],
     [12, 4, 14, 6],
@@ -107,8 +109,8 @@
     /** Tıklanan yatay koordinat hangi çalışanın alanında? (1, 2 veya 3) */
     workerAt(cssX) {
       const lx = cssX / this.pcss - this.ox;
-      if (lx >= 286 && lx <= 356) return 3;
-      if (lx >= 176 && lx <= 244) return 2;
+      if (lx >= 286 + O3 && lx <= 356 + O3) return 3;
+      if (lx >= 176 && lx <= 246) return 2;
       return 1;
     }
 
@@ -264,19 +266,21 @@
       this.drawClock();
       this.drawWindow(tod);
       this.drawShelf();
-      this.drawWallArt3();
       this.drawArmchair();
       this.drawCat();
       this.drawFloorPlant();
       this.drawFloorShadow();
-      // üçüncü çalışan (metin yazarı) ve masası
+      // üçüncü çalışan (metin yazarı) ve masası — O3 kadar sağda
       const p3 = this.pose3();
+      this.ox += O3;
+      this.drawWallArt3();
       this.drawChair3();
       this.drawWorker3(p3);
       this.drawDesk3();
       this.drawNotebook3(p3);
       this.drawArms3(p3);
       this.drawEffects3(p3);
+      this.ox -= O3;
       // ikinci çalışan ve masası
       const p2 = this.pose2();
       this.drawChair2();
@@ -582,8 +586,8 @@
     drawFloorShadow() {
       this.D(42, 87, 64, 1, MID);
       this.D(178, 87, 64, 1, MID);
-      this.D(248, 87, 36, 1, MID, 1);
-      this.D(288, 87, 64, 1, MID);
+      this.D(264, 87, 36, 1, MID, 1);
+      this.D(288 + O3, 87, 64, 1, MID);
     }
 
     drawChair() {
@@ -818,7 +822,7 @@
     }
 
     drawArmchair() {
-      const o = 92; // oda genişledi: koltuk sağa taşındı
+      const o = 108; // geniş odada 2. ve 3. çalışan arasında ortalandı
       // sırt
       this.box(176 + o, 62, 14, 26, true, BG);
       this.D(186 + o, 64, 3, 22, MID);
@@ -836,7 +840,7 @@
     }
 
     drawCat() {
-      const o = 92;
+      const o = 108;
       // koltukta kıvrılmış uyuyan kedi; kuyruğu ara ara sallanır
       const tail = this.catTail > 0 ? (this.catTail % 4 < 2 ? 0 : 1) : 0;
       this.S(163 + o, 67, [
@@ -855,7 +859,7 @@
     drawFloorPlant() {
       // köşede uzun saksı bitkisi
       const sway = Math.floor(this.t / 14) % 2;
-      this.S(358, 65, [
+      this.S(414, 65, [
         sway ? '....#.......' : '.....#......',
         '...#m#..#...',
         '..#mm#.#m#..',
@@ -873,7 +877,7 @@
         '....#mm#....',
         '....####....',
       ]);
-      this.S(359, 81, ['..########..', '..#mmmmmm#..', '..#mmmmmm#..', '...#mmmm#...', '...#mmmm#...', '...#mmmm#...', '...######...']);
+      this.S(415, 81, ['..########..', '..#mmmmmm#..', '..#mmmmmm#..', '...#mmmm#...', '...#mmmm#...', '...#mmmm#...', '...######...']);
     }
 
     /* ---------- ikinci çalışan: kullanım uzmanı ---------- */
@@ -1111,7 +1115,7 @@
     }
 
     drawWorker3(p) {
-      const cx = H3X, cy = H3Y + p.by, r = H3R;
+      const cx = H3X_LOCAL, cy = H3Y + p.by, r = H3R;
       // gövde: çizgili boğazlı kazak + yelek
       const top = cy + r - 1;
       for (let y = top; y <= 76; y++) {
@@ -1263,7 +1267,7 @@
       }
       if (this.mood3 === 'sleep') {
         const t = f % 18;
-        const x = H3X + 9 + Math.floor(t / 3), y = H3Y - 6 - t;
+        const x = H3X_LOCAL + 9 + Math.floor(t / 3), y = H3Y - 6 - t;
         if (y > 4) { this.R(x, y, 3, 1); this.P(x + 1, y + 1); this.R(x, y + 2, 3, 1); }
       }
     }

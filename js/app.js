@@ -504,34 +504,97 @@
     nextTimer = setTimeout(() => { if (typeof tickTalk === 'function') tickTalk(); }, GAPS[state.settings.freq] + 30);
     if (!state.paused) setMood('typing', 4000);
     updateTitle();
+    placeAllBubbles();
   }
-  function placeBubble() {
-    if (bubble.hidden) return;
-    const a = scene.headAnchor();
-    const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
-    const hx = cr.left - sr.left + a.x;
-    const hy = cr.top - sr.top + a.y;
-    const bw = bubble.offsetWidth;
-    let left = hx - bw * 0.42;
-    left = Math.max(8, Math.min(left, sr.width - bw - 8));
-    bubble.style.left = left + 'px';
-    bubble.style.bottom = (sr.height - hy + 14) + 'px';
+
+  /** Üç çalışanın konuşma balonlarını birbirinin üstüne binmeyecek şekilde yan yana yerleştir */
+  function placeAllBubbles() {
+    const cr = canvas.getBoundingClientRect();
+    const sr = stage.getBoundingClientRect();
+    if (!sr.width) return;
     const cardTop = $('card').getBoundingClientRect().top;
-    if (typeof placeBubble2 === 'function') setTimeout(placeBubble2, 0);
-    const inner = bubble.firstElementChild;
-    if (inner) {
-      const maxH = Math.max(140, sr.top - cardTop + hy - 54);
-      inner.classList.remove('scrolls');
-      inner.style.maxHeight = '';
-      // sadece gerçekten sığmıyorsa kaydır (birkaç piksellik taşma için asla)
-      if (inner.scrollHeight > maxH + 4) {
-        inner.style.maxHeight = maxH + 'px';
-        inner.classList.add('scrolls');
+    const pad = 8, gap = 10;
+    const defs = [
+      { el: $('bubble'),  anchor: () => scene.headAnchor(),  bias: 0.42 },
+      { el: $('bubble2'), anchor: () => scene.headAnchor2(), bias: 0.50 },
+      { el: $('bubble3'), anchor: () => scene.headAnchor3(), bias: 0.68 },
+    ];
+    const vis = [];
+    defs.forEach((d) => {
+      if (!d.el) return;
+      d.el.style.maxWidth = '';
+      d.el.classList.remove('floating');
+      if (d.el.hidden) return;
+      const a = d.anchor();
+      const hx = a ? cr.left - sr.left + a.x : sr.width - 24;
+      const hy = a ? cr.top - sr.top + a.y : cr.top - sr.top + 40;
+      vis.push({ ...d, a, hx, hy });
+    });
+    if (!vis.length) return;
+
+    const avail = sr.width - pad * 2 - gap * (vis.length - 1);
+    const canSideBySide = vis.length === 1 || (avail / vis.length) >= 210;
+    if (vis.length > 1 && canSideBySide) {
+      // Dar/kompakt etiketler kendi küçük genişliğini alsın, kalan alanı büyük balonlar eşit paylaşsın
+      const fixedW = vis.reduce((s, v) => s + (v.el.classList.contains('compact') ? v.el.offsetWidth : 0), 0);
+      const flexN = vis.filter((v) => !v.el.classList.contains('compact')).length || 1;
+      const laneMax = Math.max(200, Math.floor((avail - fixedW) / flexN));
+      vis.forEach((v) => { if (!v.el.classList.contains('compact')) v.el.style.maxWidth = laneMax + 'px'; });
+    }
+
+    vis.forEach((v) => {
+      v.bw = v.el.offsetWidth;
+      v.left = Math.max(pad, Math.min(v.hx - v.bw * v.bias, sr.width - v.bw - pad));
+      v.bottom = sr.height - v.hy + 14;
+    });
+
+    if (vis.length > 1 && canSideBySide) {
+      // Soldan sağa iterek çakışmayı gider
+      for (let i = 1; i < vis.length; i++) {
+        vis[i].left = Math.max(vis[i].left, vis[i - 1].left + vis[i - 1].bw + gap);
+      }
+      // Sağdan taştıysa geri çekip sola yay
+      const last = vis[vis.length - 1];
+      if (last.left + last.bw > sr.width - pad) {
+        last.left = sr.width - pad - last.bw;
+        for (let i = vis.length - 2; i >= 0; i--) {
+          vis[i].left = Math.min(vis[i].left, vis[i + 1].left - vis[i].bw - gap);
+        }
+        if (vis[0].left < pad) vis[0].left = pad;
       }
     }
-    bubble.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
+
+    vis.forEach((v, idx) => {
+      v.el.style.left = Math.round(v.left) + 'px';
+      v.el.style.bottom = Math.round(v.bottom) + 'px';
+      if (!v.a) v.el.classList.add('floating');
+      const tail = Math.max(16, Math.min(v.bw - 16, v.hx - v.left));
+      v.el.style.setProperty('--tail', Math.round(tail) + 'px');
+
+      if (!canSideBySide && idx > 0) {
+        const prev = vis[idx - 1].el;
+        const curB = { l: v.el.offsetLeft, t: v.el.offsetTop, r: v.el.offsetLeft + v.el.offsetWidth, b: v.el.offsetTop + v.el.offsetHeight };
+        const preB = { l: prev.offsetLeft, t: prev.offsetTop, r: prev.offsetLeft + prev.offsetWidth, b: prev.offsetTop + prev.offsetHeight };
+        if (!(curB.r < preB.l || curB.l > preB.r || curB.b < preB.t || curB.t > preB.b)) {
+          v.el.style.bottom = Math.round(stage.clientHeight - preB.t + 8) + 'px';
+          v.el.classList.add('floating');
+        }
+      }
+
+      const inner = v.el.firstElementChild;
+      if (inner) {
+        const maxH = Math.max(130, sr.top - cardTop + v.hy - 36);
+        inner.classList.remove('scrolls');
+        inner.style.maxHeight = '';
+        if (inner.scrollHeight > maxH + 4) {
+          inner.style.maxHeight = maxH + 'px';
+          inner.classList.add('scrolls');
+        }
+      }
+    });
   }
-  window.addEventListener('resize', placeBubble);
+  function placeBubble() { placeAllBubbles(); }
+  window.addEventListener('resize', placeAllBubbles);
 
   function setMood(m, ms = 0) {
     scene.setMood(m);
@@ -761,6 +824,7 @@
     clearTimeout(bubbleTimer);
     bubble.hidden = true;
     bubbleKind = null;
+    placeAllBubbles();
   }
 
   function addWord(res) {
@@ -1446,46 +1510,12 @@
   }
   /** Soru bu kelimeyi soruyorsa kartı gizle (cevabı ele vermesin) */
   function hideUsageFor(w) {
-    if (w && usageShownId === w.id) { bubble2.hidden = true; usageShownId = null; usageExpanded = false; }
+    if (w && usageShownId === w.id) { bubble2.hidden = true; usageShownId = null; usageExpanded = false; placeAllBubbles(); }
   }
-  function placeBubble2() {
-    if (bubble2.hidden) return;
-    const a = scene.headAnchor2();
-    const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
-    const hx = a ? cr.left - sr.left + a.x : sr.width - 24;
-    const hy = a ? cr.top - sr.top + a.y : cr.top - sr.top + 40;
-    const bw = bubble2.offsetWidth;
-    let left = hx - bw * 0.55;
-    // ana balonla çakışmasın
-    // ana balonun gerçek yerleşimi (açılış animasyonundan etkilenmeyen ölçü)
-    const mb = bubble.hidden ? null : { l: bubble.offsetLeft, t: bubble.offsetTop, r: bubble.offsetLeft + bubble.offsetWidth, b: bubble.offsetTop + bubble.offsetHeight };
-    if (mb) left = Math.max(left, mb.r + 10);
-    left = Math.max(8, Math.min(left, sr.width - bw - 8));
-    bubble2.style.left = left + 'px';
-    bubble2.style.bottom = (sr.height - hy + 14) + 'px';
-    bubble2.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
-    bubble2.classList.remove('floating');
-    // dar ekranda ana balonla çakışırsa onun üstüne çık (kuyruksuz)
-    if (mb) {
-      const b2 = { l: bubble2.offsetLeft, t: bubble2.offsetTop, r: bubble2.offsetLeft + bubble2.offsetWidth, b: bubble2.offsetTop + bubble2.offsetHeight };
-      const overlap = !(b2.r < mb.l || b2.l > mb.r || b2.b < mb.t || b2.t > mb.b);
-      if (overlap) {
-        bubble2.style.bottom = (stage.clientHeight - mb.t + 8) + 'px';
-        bubble2.classList.add('floating');
-      }
-    }
-    const inner = bubble2.firstElementChild;
-    const cardTop = $('card').getBoundingClientRect().top;
-    if (inner) {
-      const maxH = Math.max(120, sr.top - cardTop + hy - 54);
-      inner.classList.remove('scrolls');
-      inner.style.maxHeight = '';
-      if (inner.scrollHeight > maxH + 4) { inner.style.maxHeight = maxH + 'px'; inner.classList.add('scrolls'); }
-    }
-  }
+  function placeBubble2() { placeAllBubbles(); }
   bubble2.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
-    if (b && b.dataset.act === 'tr') { bubble2.classList.toggle('show-tr'); placeBubble2(); return; }
+    if (b && b.dataset.act === 'tr') { bubble2.classList.toggle('show-tr'); placeAllBubbles(); return; }
     if (b && b.dataset.act === 'u-close') { usageExpanded = false; const w = state.words.find((x) => x.id === usageShownId); if (w) renderUsage(w); return; }
     if (bubble2.classList.contains('compact') && usageShownId) {
       // dar ekranda: dokununca aç, okurken soru gelmesin
@@ -1495,7 +1525,6 @@
       if (w) renderUsage(w);
     }
   });
-  window.addEventListener('resize', placeBubble2);
 
   /* ---------- üçüncü çalışan: kafasının üstündeki baloncukla metin yazarı ---------- */
   const bubble3 = $('bubble3');
@@ -1601,28 +1630,7 @@
       .join('');
   }
 
-  function placeBubble3() {
-    if (bubble3.hidden) return;
-    const a = scene.headAnchor3();
-    const cr = canvas.getBoundingClientRect(), sr = stage.getBoundingClientRect();
-    const hx = a ? cr.left - sr.left + a.x : sr.width - 24;
-    const hy = a ? cr.top - sr.top + a.y : cr.top - sr.top + 40;
-    const bw = bubble3.offsetWidth;
-    const left = Math.max(8, Math.min(hx - bw * 0.78, sr.width - bw - 8));
-    bubble3.style.left = left + 'px';
-    bubble3.style.bottom = (sr.height - hy + 14) + 'px';
-    bubble3.style.setProperty('--tail', Math.max(16, Math.min(bw - 16, hx - left)) + 'px');
-    bubble3.classList.toggle('floating', !a);
-    const inner = bubble3.firstElementChild;
-    const cardTop = $('card').getBoundingClientRect().top;
-    if (inner) {
-      const maxH = Math.max(160, sr.top - cardTop + hy - 28);
-      inner.classList.remove('scrolls');
-      inner.style.maxHeight = '';
-      if (inner.scrollHeight > maxH + 4) { inner.style.maxHeight = maxH + 'px'; inner.classList.add('scrolls'); }
-    }
-  }
-  window.addEventListener('resize', placeBubble3);
+  function placeBubble3() { placeAllBubbles(); }
 
   function buildChipsHtml() {
     const validIds = new Set(state.words.map((w) => w.id));
@@ -1759,6 +1767,7 @@
   function closeStory() {
     bubble3.hidden = true;
     $('storyBtn').classList.remove('on');
+    placeAllBubbles();
   }
 
   function toggleStory() {
