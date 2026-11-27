@@ -202,7 +202,7 @@ Using the learner's words below, create exactly {N} short, varied teaching momen
 - {"type":"ask","id":"<word id>","q_de":"<a simple, friendly German question (A2) the learner can answer using the word>","q_tr":"<Turkish translation>"}
 - {"type":"tip","id":"<word id>","text_de":"<max 2 short, simple, casual German sentences: article, plural, conjugation, a false friend, or a memory trick>","de":"<one short German example>"}
 - {"type":"chat","text_de":"<one casual German friend line (max 12 words): what you are doing for them right now, a cheer, or a tiny joke about one of their words>"}
-- {"type":"new","de":"<a useful everyday A2 word NOT in the known list, without article>","art":"der|die|das or empty","pos":"n|v|a|d","tr":"<Turkish>","explain_de":"<max 2 very simple German sentences that do NOT contain the word or any form of it>","example":{"de":"<sentence containing exactly that form>","tr":"<Turkish>"}}
+- {"type":"new","de":"<a high-frequency B1–C1 word native German speakers LOVE in everyday speech, NOT in the known list, without article>","art":"der|die|das or empty","pos":"n|v|a|d","level_cefr":"B1|B2|C1","tr":"<Turkish>","why_de":"<short German note (max 12 words) on why natives use it often>","why_tr":"<same in Turkish>","explain_de":"<max 2 very simple German sentences that do NOT contain the word or any form of it>","example":{"de":"<natural spoken sentence containing the word>","tr":"<Turkish>"}}
 Each word may have an "avoid" list: sentences/questions the learner has ALREADY seen. Never reuse, copy or closely
 paraphrase them — every sentence must be brand new. Keep it fresh and varied:
 - situation/theme for this batch: {THEME} (but stay natural for each word),
@@ -296,6 +296,35 @@ Return ONLY JSON:
   "title_de": "<short evocative German title>",
   "text_de": "<the German text with paragraphs separated by \\n\\n and every target word wrapped in [[...]]>",
   "text_tr": "<natural Turkish translation of the full text with matching \\n\\n paragraphs, NO brackets>"
+}`;
+
+const SUGGEST_PROMPT = `You are a sharp German language coach helping a Turkish learner expand from everyday basics into truly natural,
+fluent spoken German. Based on the words they have already learned, recommend {N} German words at B1–C1 level that:
+- Native German speakers genuinely LOVE and use constantly in real spoken daily life, conversations, work, podcasts, and cafés
+  (expressive verbs, separable verbs, natural adverbs/particles, versatile adjectives, vivid everyday nouns — e.g. the kind of
+  words that instantly make someone sound natural, like "nachvollziehen", "ausgerechnet", "hinkriegen", "gönnen", "anscheinend",
+  "überfordert", "klappen", "ausmachen", "gelassen", "mitbekommen", "erledigen", "selbstverständlich", etc. — do NOT just repeat
+  these examples; pick fresh, varied words connected to the learner's vocabulary themes and daily life).
+- Are STRICTLY NOT in the learner's known/excluded word list (and not a simple inflection or trivial A1–A2 word).
+- Mix parts of speech (verbs, adjectives, adverbs/particles, nouns) and mix B1, B2, and C1 naturally.
+- Never use emojis.
+Return ONLY JSON:
+{
+  "items": [
+    {
+      "de": "<dictionary form WITHOUT article; nouns capitalized, verbs in infinitive>",
+      "art": "der|die|das for nouns, otherwise empty string",
+      "plural": "<plural with article for nouns, or empty string>",
+      "pos": "n|v|a|d",
+      "level_cefr": "B1|B2|C1",
+      "tr": "<most natural Turkish equivalent>",
+      "alts": ["<0–2 other Turkish meanings>"],
+      "why_de": "<1 short natural German line (max 14 words): why natives love this word or how it links to their learned words>",
+      "why_tr": "<same short line in Turkish>",
+      "explain_de": "<1–2 simple German sentences explaining the meaning WITHOUT using the word itself or any form of it (used as quiz clue)>",
+      "example": { "de": "<natural spoken everyday German sentence (7–14 words) using the word>", "tr": "<natural Turkish translation>" }
+    }
+  ]
 }`;
 
 /* ---------- sunucu ---------- */
@@ -483,6 +512,22 @@ async function handle(req) {
           text_tr: String(out?.text_tr ?? "").slice(0, 3500),
           _usage: USAGE,
         }, 200, h);
+      }
+
+      // ---------- B1–C1 ana dilde çok sevilen günlük kelime önerileri ----------
+      case "suggest": {
+        const n = Math.max(1, Math.min(8, Number(body.n) || 5));
+        const learned = (Array.isArray(body.learned) ? body.learned : []).slice(0, 80).map((s) => String(s).slice(0, 40)).filter(Boolean);
+        const known = (Array.isArray(body.known) ? body.known : []).slice(0, 500).map((s) => String(s).slice(0, 40)).filter(Boolean);
+        const interests = (Array.isArray(body.interests) ? body.interests : []).slice(0, 8).map((s) => String(s).slice(0, 40)).filter(Boolean);
+        const sys = SUGGEST_PROMPT.replace("{N}", String(n));
+        EFFORT = "low";
+        const user =
+          `Words the learner has already studied/learned (use as inspiration for themes & level):\n${learned.length ? learned.join(", ") : "(just starting)"}\n\n` +
+          (interests.length ? `Learner interests: ${interests.join(", ")}\n\n` : "") +
+          `ALL known or skipped words (STRICTLY DO NOT suggest any of these or close variants):\n${known.join(", ")}`;
+        const out = await askJson(withProfile(sys, body), user, 0.85);
+        return json({ items: Array.isArray(out?.items) ? out.items : [], _usage: USAGE }, 200, h);
       }
 
       case "ping":

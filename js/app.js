@@ -367,7 +367,7 @@
   const ID_SOUNDS = {
     menuBtn: 'menuOpen', closeSheet: 'menuClose', askBtn: 'ask', exportBtn: 'export',
     resetBtn: 'reset', profileRefresh: 'refresh', profileForget: 'forget',
-    storyBtn: 'reveal', closeStory: 'menuClose', storyWriteBtn: 'ask',
+    storyBtn: 'reveal', closeStory: 'menuClose', storyWriteBtn: 'ask', suggestBtn: 'ask',
   };
   function soundFor(b) {
     if (b.id === 'pauseBtn') return state.paused ? 'resume' : 'pause';
@@ -509,6 +509,9 @@
     if (window.Reader) Reader.clearMark();
     bubble.hidden = true;
     bubbleKind = null;
+    if (typeof suggestBrowse !== 'undefined') suggestBrowse = false;
+    const sb = $('suggestBtn');
+    if (sb) sb.classList.remove('on');
     nextReviewAt = Date.now() + GAPS[state.settings.freq];
     clearTimeout(nextTimer);
     nextTimer = setTimeout(() => { if (typeof tickTalk === 'function') tickTalk(); }, GAPS[state.settings.freq] + 30);
@@ -1331,33 +1334,154 @@
     return false; // örnek / boşluk / soru / ipucu türleri kaldırıldı: soru sadece resimli ya da Türkçe → Almanca
   }
 
-  function suggestNew(it) {
-    const s = (v) => (typeof v === 'string' ? v.trim() : '');
-    const de = s(it.de).replace(/^(der|die|das)\s+/i, '');
-    if (!de || !s(it.tr) || findExisting(de)) return false;
-    const art = ['der', 'die', 'das'].includes(s(it.art)) ? s(it.art) : '';
-    if (it.example && s(it.example.de)) markShown(s(it.example.de));
-    pendingNew = {
-      de, art, tr: s(it.tr), pos: it.pos || (art ? 'n' : ''), explain_de: s(it.explain_de),
-      ex: it.example && s(it.example.de) ? { de: s(it.example.de), tr: s(it.example.tr), src: 'muse' } : null,
-      dir: 'tr2de', source: 'muse',
+  const suggestQueue = [];
+  let suggestBusy = false;
+  let suggestBrowse = false;
+
+  const isSkippedWord = (de) => {
+    const k = T.key(de || '');
+    return !!k && (state.skipped || []).some((x) => T.key(x) === k);
+  };
+
+  function normalizeSuggestion(it) {
+    const s = (v, n = 220) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+    const de = s(it && it.de, 60).replace(/^(der|die|das)\s+/i, '');
+    const tr = s(it && it.tr, 80);
+    if (!de || !tr || findExisting(de) || isSkippedWord(de)) return null;
+    const art = ['der', 'die', 'das'].includes(s(it.art, 10).toLowerCase()) ? s(it.art, 10).toLowerCase() : '';
+    const cefr = ['B1', 'B2', 'C1'].includes(s(it.level_cefr, 4).toUpperCase()) ? s(it.level_cefr, 4).toUpperCase() : '';
+    const alts = Array.isArray(it.alts) ? it.alts.map((a) => s(a, 40)).filter(Boolean).slice(0, 2) : [];
+    const ex = it.example && s(it.example.de, 220) ? { de: s(it.example.de, 220), tr: s(it.example.tr, 220), src: 'muse' } : null;
+    return {
+      de, art, tr, alts,
+      plural: s(it.plural, 60),
+      pos: ['n', 'v', 'a', 'd'].includes(it.pos) ? it.pos : (art ? 'n' : ''),
+      cefr,
+      why_de: s(it.why_de, 160),
+      why_tr: s(it.why_tr, 160),
+      explain_de: s(it.explain_de, 260),
+      ex,
+      dir: 'tr2de',
+      source: 'muse',
     };
+  }
+
+  function suggestNew(it, opts = {}) {
+    const item = it && it.dir === 'tr2de' && it.de ? it : normalizeSuggestion(it);
+    if (!item || findExisting(item.de) || isSkippedWord(item.de)) return false;
+    if (item.ex && item.ex.de) markShown(item.ex.de);
+    pendingNew = item;
+    const browse = !!opts.browse;
+    suggestBrowse = browse;
+    $('suggestBtn').classList.toggle('on', browse);
+    const badge = item.cefr ? `<span class="b-cefr">${esc(item.cefr)}</span>` : '';
+    const tag = `${badge}${browse ? 'ana dilde çok sevilen öneri' : pick(['Das benutzen Muttersprachler ständig', 'Ein starkes Alltagswort für dich', 'Hier, ein neues Alltagswort'])}`;
+    const toast = opts.toast ? `<div class="b-toast">${esc(opts.toast)}</div>` : '';
+    const why = item.why_de
+      ? `<div class="b-say">${esc(item.why_de)}${item.why_tr ? `<span class="tr"> (${esc(item.why_tr)})</span>` : ''}</div>`
+      : '';
     setMood('talking', 1500);
-    showBubble(`${wordCard(pendingNew, pick(['Ich habe ein neues Wort für dich', 'Das solltest du kennen', 'Hier, ein neues Wort']))}
-      <div class="b-actions"><button class="btn sm solid" data-act="addnew">ins Heft</button><button class="btn sm" data-act="skip">weiter</button></div>`, 'chat', { autoClose: 12000 });
+    showBubble(`${toast}${wordCard(item, tag, { noImg: true })}${why}
+      <div class="b-actions">
+        <button class="btn sm solid" data-act="addnew">+ Listeye ekle</button>
+        <button class="btn sm" data-act="skip">Biliyorum / Geç</button>
+        ${browse ? '<button class="btn sm" data-act="close-suggest">Kapat</button>' : ''}
+      </div>`, 'chat', { autoClose: browse ? 0 : 18000, focus: false });
+    if (state.settings.voice === 'on' && browse) say(fullDe(item));
     return true;
   }
 
+  function closeSuggest() {
+    suggestBrowse = false;
+    pendingNew = null;
+    $('suggestBtn').classList.remove('on');
+    hideBubble();
+  }
+
+  async function suggestNext(toast = '') {
+    if (suggestBusy) return;
+    if (state.paused) $('pauseBtn').click();
+    suggestBrowse = true;
+    $('suggestBtn').classList.add('on');
+    // kuyrukta geçerli öneri varsa anında göster
+    while (suggestQueue.length) {
+      const next = suggestQueue.shift();
+      if (suggestNew(next, { browse: true, toast })) return;
+    }
+    if (!window.AI || !AI.suggest) {
+      showBubble(`<div class="b-tag">Kelime Önerisi</div><div>AI istemcisi hazır değil.</div>
+        <div class="b-actions"><button class="btn sm" data-act="close-suggest">Kapat</button></div>`, 'chat', { focus: false });
+      return;
+    }
+    suggestBusy = true;
+    setMood('thinking', 8000);
+    showBubble(`${toast ? `<div class="b-toast">${esc(toast)}</div>` : ''}<div class="b-tag">B1–C1 · Kelime Önerisi</div>
+      <div class="b-say">Öğrendiğin kelimelere bakıp ana dilde çok sevilen yeni kelimeler seçiyorum…</div>`, 'chat', { focus: false });
+    try {
+      // öğrendiği kelimelerden örneklem (öncelik en yüksek seviyeli / çok çalışılanlarda)
+      const learned = [...state.words]
+        .sort((a, b) => (b.level || 0) - (a.level || 0) || (b.reviews || 0) - (a.reviews || 0))
+        .slice(0, 80)
+        .map((w) => fullDe(w));
+      const known = [...new Set([
+        ...state.words.map((w) => w.de),
+        ...(state.skipped || []),
+      ])].slice(-500);
+      const raw = await AI.suggest(learned, known, 5);
+      const fresh = raw.map(normalizeSuggestion).filter(Boolean);
+      fresh.forEach((x) => {
+        if (!suggestQueue.some((q) => T.key(q.de) === T.key(x.de))) suggestQueue.push(x);
+      });
+      suggestBusy = false;
+      if (suggestQueue.length) {
+        const first = suggestQueue.shift();
+        if (suggestNew(first, { browse: true, toast })) return;
+      }
+      showBubble(`<div class="b-tag">B1–C1 · Kelime Önerisi</div><div>Şu an yeni bir öneri çıkmadı, tekrar deneyebilirsin.</div>
+        <div class="b-actions"><button class="btn sm solid" data-act="more-suggest">Tekrar dene</button><button class="btn sm" data-act="close-suggest">Kapat</button></div>`, 'chat', { focus: false });
+    } catch (e) {
+      suggestBusy = false;
+      const msg = String((e && e.message) || e || '');
+      const text = msg === 'unknown_action'
+        ? 'Cloudflare Worker henüz güncellenmemiş: cloudflare/worker.js dosyasını Cloudflare panelinde Deploy ettikten sonra tekrar dene.'
+        : 'Öneri alınamadı (' + (msg || 'bağlantı hatası') + ').';
+      showBubble(`<div class="b-tag">B1–C1 · Kelime Önerisi</div><div>${esc(text)}</div>
+        <div class="b-actions"><button class="btn sm" data-act="close-suggest">Kapat</button></div>`, 'chat', { focus: false });
+    }
+  }
+
   function addSuggested() {
-    if (!pendingNew) return hideBubble();
-    logEvent('accepted_suggestion', { de: (pendingNew.art ? pendingNew.art + ' ' : '') + pendingNew.de, tr: pendingNew.tr });
-    const w = addWord(pendingNew);
+    if (!pendingNew) return closeSuggest();
+    const item = pendingNew;
+    const wasBrowse = suggestBrowse;
+    logEvent('accepted_suggestion', { de: (item.art ? item.art + ' ' : '') + item.de, tr: item.tr, cefr: item.cefr || '' });
+    const w = addWord(item);
     pendingNew = null;
     showUsage(w);
     setMood('happy', 1800);
+    celebrateGoal();
+    if (wasBrowse) {
+      suggestNext(`✓ „${fullDe(w)}“ listene eklendi`);
+      return;
+    }
     showBubble(`${wordCard(w, 'steht im Heft ✓ ich frage dich oft')}<div class="b-actions"><button class="btn sm" data-act="close">ok</button></div>`, 'info', { autoClose: 9000 });
     if (state.settings.voice === 'on') say(fullDe(w));
-    celebrateGoal();
+  }
+
+  function skipSuggested() {
+    const wasBrowse = suggestBrowse;
+    const skippedName = pendingNew ? pendingNew.de : '';
+    if (pendingNew) {
+      logEvent('skipped_suggestion', { de: pendingNew.de, tr: pendingNew.tr });
+      state.skipped = [...new Set([...(state.skipped || []), pendingNew.de])].slice(-300);
+      save();
+    }
+    pendingNew = null;
+    if (wasBrowse) {
+      suggestNext(skippedName ? `Geçildi: ${skippedName}` : '');
+    } else {
+      hideBubble();
+    }
   }
 
   async function answerAsk(answer) {
@@ -2131,14 +2255,9 @@
     else if (act === 'later') { if (current) logEvent('postponed', { de: fullDe(current.w), mode: current.mode }); postpone(); hideBubble(); }
     else if (act === 'addnew') addSuggested();
     else if (act === 'addbook') addFromBook();
-    else if (act === 'skip') {
-      if (pendingNew) {
-        logEvent('skipped_suggestion', { de: pendingNew.de, tr: pendingNew.tr });
-        state.skipped = [...(state.skipped || []), pendingNew.de].slice(-100);
-        save();
-      }
-      pendingNew = null; hideBubble();
-    }
+    else if (act === 'skip') skipSuggested();
+    else if (act === 'close-suggest') closeSuggest();
+    else if (act === 'more-suggest') suggestNext();
     else if (act === 'say-ex') say(b.dataset.text);
   });
 
@@ -2238,6 +2357,10 @@
     askWithRefreshTrack(w);
   }
   $('askBtn').addEventListener('click', askNow);
+  $('suggestBtn').addEventListener('click', () => {
+    if (suggestBrowse && !bubble.hidden) closeSuggest();
+    else suggestNext();
+  });
   canvas.addEventListener('click', (e) => {
     const cr = canvas.getBoundingClientRect();
     const who = scene.workerAt ? scene.workerAt(e.clientX - cr.left) : 1;
@@ -2568,5 +2691,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // test için
-  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), openStory, renderUnderlinedStory, toggleWorker2, dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, worker2Muted: !!state.worker2Muted, words: state.words.length, mood: scene.mood, mood2: scene.mood2, mood3: scene.mood3, thought: thought.hidden ? '' : thought.textContent, dormant }) };
+  window.__app = { state: () => state, startReview, scene, submitWord, setMood, hideBubble, nextTalkNow: () => { hideBubbleQuiet(); nextTalk(); }, think, showAiItem: (it) => { hideBubbleQuiet(); return showAiItem(it); }, refill: () => { aiNextFetch = 0; return refillQueue(); }, queueLen: () => aiQueue.length, profileNow: () => maybeUpdateProfile(true), idleFor: (ms) => { lastInteraction = Date.now() - ms; }, isActive: () => isActive(), review: (w, q) => review(w, q), syncNow: () => syncNow(), openStory, renderUnderlinedStory, toggleWorker2, suggestNext, dbg: () => ({ bubbleKind, busy, nextIn: nextReviewAt - Date.now(), quietIn: readerQuietUntil - Date.now(), paused: state.paused, worker2Muted: !!state.worker2Muted, words: state.words.length, mood: scene.mood, mood2: scene.mood2, mood3: scene.mood3, thought: thought.hidden ? '' : thought.textContent, dormant }) };
 })();

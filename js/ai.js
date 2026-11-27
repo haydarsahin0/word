@@ -10,10 +10,10 @@
   let usageCb = null;
 
   async function call(action, payload, ms = 25000) {
-    const independent = action === 'image' || action === 'usage' || action === 'story'; // görseller/kullanım/metin konuşma hatalarından etkilenmesin
+    const independent = action === 'image' || action === 'usage' || action === 'story' || action === 'suggest'; // görseller/kullanım/metin/öneri konuşma hatalarından etkilenmesin
     if (!independent && Date.now() < downUntil) throw new Error('ai_down');
-    // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri ve metin yazma hariç
-    if (action !== 'lookup' && action !== 'story' && !activeCheck()) throw new Error('inactive');
+    // sen bakmıyorken (sekme arka planda / uzun süre dokunulmadı) model çağrılmaz; çeviri/metin/öneri hariç
+    if (action !== 'lookup' && action !== 'story' && action !== 'suggest' && !activeCheck()) throw new Error('inactive');
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), ms);
     try {
@@ -103,6 +103,12 @@
     };
   }
 
+  /** Öğrenilen kelimelerden yola çıkarak ana dilde çok sevilen B1–C1 kelime önerileri */
+  async function suggest(learned, known, n = 5) {
+    const j = await call('suggest', { learned, known, n, interests: profileProvider().interests || [] }, 45000);
+    return Array.isArray(j.items) ? j.items.filter((it) => it && typeof it.de === 'string') : [];
+  }
+
   async function profile(old, events) {
     return call('profile', { old, events }, 45000);
   }
@@ -138,7 +144,7 @@
   };
 
   window.AI = {
-    lookup, talk, check, profile, image, usage, story,
+    lookup, talk, check, profile, image, usage, story, suggest,
     setProfileProvider: (fn) => { profileProvider = fn; },
     setActiveCheck: (fn) => { activeCheck = fn; },
     onUsage: (fn) => { usageCb = fn; },
